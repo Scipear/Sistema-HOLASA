@@ -14,7 +14,7 @@ Sigue estos pasos para clonar el repositorio y configurar tu entorno local utili
 ### 1. Clonar el Repositorio
 Abre tu terminal y ejecuta los siguientes comandos:
 ```bash
-git clone <URL_DE_TU_REPOSITORIO>
+git clone <URL_DEL_REPOSITORIO>
 cd <NOMBRE_DE_LA_CARPETA>
 ```
 ### 2. Crear el entorno virtual

@@ -28,7 +28,7 @@ python -m venv .venv
 ```
 ### 4. Instalar dependencias
 ```bash
-pip install -r requirements.txtNumpy
+pip install -r requirements.txt
 ```
 
 ### 5. Ejecutar el proyecto

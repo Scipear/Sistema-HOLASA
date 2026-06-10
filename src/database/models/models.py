@@ -31,6 +31,7 @@ class ProfesorModel(Base):
     
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     nombre = Column(String(255), nullable=False)
+    apellido = Column(String(255), nullable=False)
     telefono = Column(String(50), nullable=True)
     correo = Column(String(255), unique=True, nullable=True)
     estado = Column(Boolean, default=True)

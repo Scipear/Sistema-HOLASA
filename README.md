@@ -35,3 +35,34 @@ pip install -r requirements.txt
 ```bash
 python main.py
 ```
+
+---
+
+## 🧪 Tests
+
+### 1. Instalar pytest
+```bash
+pip install pytest
+```
+
+### 2. Ejecutar tests
+
+**Suite completa** (crea → consulta → modifica → elimina):
+```bash
+pytest tests/ -v
+```
+
+**Por archivo** (orden recomendado):
+```bash
+pytest tests/test_01_creacion.py -v       # crea datos
+pytest tests/test_02_consulta.py -v       # lee datos
+pytest tests/test_03_actualizacion.py -v  # modifica datos
+pytest tests/test_04_eliminacion.py -v    # elimina datos
+```
+
+### 3. Resetear la base de datos de tests
+
+Eliminar manualmente el archivo `tests/test_HOLASA.sqlite3`.
+
+Los tests de creación son **idempotentes**: si los datos ya existen,
+se saltan automáticamente.

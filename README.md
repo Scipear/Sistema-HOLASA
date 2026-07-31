@@ -38,6 +38,32 @@ python main.py
 
 ---
 
+## 💾 Inicialización de la base de datos
+
+### 1. Creación de la base de datos
+```bash
+python src/database/init_db.py
+```
+
+**Si tienes problemas también puedes intentar con el siguiente comando**
+
+```bash
+python -m src.database.init_db
+```
+
+### 2. Ejecucion de los seeders
+```bash
+python src/database/seeders.py
+```
+
+**Si tienes problemas también puedes intentar con el siguiente comando**
+
+```bash
+python -m src.database.seeders
+```
+
+---
+
 ## 🧪 Tests
 
 ### 1. Instalar pytest
@@ -66,3 +92,17 @@ Eliminar manualmente el archivo `tests/test_HOLASA.sqlite3`.
 
 Los tests de creación son **idempotentes**: si los datos ya existen,
 se saltan automáticamente.
+
+---
+
+## 🤖 Ejecución del algoritmo generador de horarios
+
+```bash
+python src/engine/genetics.py
+```
+
+**O si tienes problemas también puedes intentar con el siguiente comando**
+
+```bash
+python -m src.database.genetics
+```

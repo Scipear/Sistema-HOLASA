@@ -1,172 +1,18 @@
 import numpy as np
 import random
 import copy
-from datetime import datetime
-from src.database.connection import SessionLocal
-from src.database.repositories import (
-    ProfesorRepository,
-    SesionRepository,
-    SalonRepository,
-    CursoRepository,
-    MencionRepository,
-    AsignaturaRepository,
-    SesionProfesorRepository,
-    CursoAsignaturaRepository,
-    ProfesorAsignaturaRepository,
-)
 from src.engine.classes import Teacher, Subject, Academic_Hour, Room, Group, Event, Availability
+from src.engine.constraints import fitness, groups_subjects, teachers_subjects, groups_gaps, subject_day
+from src.engine.data import Data
 
-DAYS_ORDER = ["Lunes", "Martes", "Miércoles", "Miercoles", "Jueves", "Viernes"]
-
-teachers = []
-subjects = []
-academic_hours = []
-rooms = []
-groups = []
-academic_hours_limits = {}
-
-def academic_hours_sort(s):
-    day_pos = DAYS_ORDER.index(s.dia) if s.dia in DAYS_ORDER else 99
-    real_hour = parse_24h(s.hora_inicio)
-    return (day_pos, real_hour)
-
-def limits_by_day() -> dict:
-    limits = {}
-    for ah in academic_hours:
-        if ah.day_index not in limits:
-            limits[ah.day_index] = {"min": ah.index, "max": ah.index}
-        else:
-            limits[ah.day_index]["max"] = ah.index
-    return limits
-
-def parse_24h(academic_hour: str) -> datetime.time:
-    hour_clean = academic_hour.strip()
-
-    for fmt in ("%I:%M %p", "%I:%M%p"):
-        try:
-            return datetime.strptime(hour_clean, fmt).time()
-        except ValueError:
-            pass
-
-    try:
-        dt = datetime.strptime(hour_clean, "%H:%M")
-
-        if 1 <= dt.hour <= 6:
-            dt = dt.replace(hour=dt.hour + 12)
-            
-        return dt.time()
-        
-    except ValueError:
-        raise ValueError(f"Formato de hora no válido: '{academic_hour}'")
-
-def load_data():
-    """Carga y adapta los datos desde la BD SQLite hacia las variables globales del motor."""
-    db = SessionLocal()
-    global teachers, subjects, academic_hours, rooms, groups, academic_hours_limits
-
-    try:
-        rooms_db = SalonRepository().get_all(db)
-        rooms = [Room(id=s.id, name=s.nombre) for s in rooms_db]
-
-        academic_hours_db = SesionRepository().get_all(db)
-        sorted_academic_hours = sorted(academic_hours_db, key=academic_hours_sort)
-
-        days_visited = {}
-        current_day_index = 0
-
-        for idx, s in enumerate(sorted_academic_hours):
-            if s.dia not in days_visited:
-                days_visited[s.dia] = current_day_index
-                current_day_index += 1
-
-            ah = Academic_Hour(
-                db_id=s.id,
-                index=idx,
-                day=s.dia,
-                day_index=days_visited[s.dia],
-                start_hour=s.hora_inicio,
-                end_hour=s.hora_fin
-            )
-            academic_hours.append(ah)
-
-        academic_hours_dict = {}
-        for ah in academic_hours_db:
-            academic_hours_dict[ah.id] = ah
-        academic_hours_limits = limits_by_day()
-
-        id_to_index = {ah.db_id: ah.index for ah in academic_hours}
-        teachers_db = ProfesorRepository().get_activos(db)
-        teachers_dict = {}
-     
-        for t in teachers_db:
-            teacher_availabilities = SesionProfesorRepository().get_by_profesor(db, t.id)
-            
-            availabilities = []
-            # Iteramos de 2 en 2 para agrupar los pares (inicio, fin)
-            for i in range(0, len(teacher_availabilities), 2):
-                start_id = teacher_availabilities[i].sesion_id
-                end_id = teacher_availabilities[i+1].sesion_id
-                
-                # Traducimos los IDs de la BD a nuestros índices virtuales de la memoria
-                start_idx = id_to_index[start_id]
-                end_idx = id_to_index[end_id]
-                
-                availabilities.append(Availability(start_idx, end_idx))
-
-            t_obj = Teacher(
-                id=t.id,
-                name=t.nombre,
-                last_name=t.apellido,
-                availabilities=availabilities
-            )
-
-            teachers.append(t_obj)
-            teachers_dict[t.id] = t_obj
-
-        groups_db = CursoRepository().get_all(db)
-        for g in groups_db:
-            speciality = MencionRepository().get_by_id(db, g.mencion_id)
-            subjs = CursoAsignaturaRepository().get_by_curso(db, g.id)
-            group_subjects = []
-
-            for s in subjs:
-                subject = AsignaturaRepository().get_by_id(db, s.asignatura_id)
-
-                if not subject:
-                    continue
-
-                teachers_subject = ProfesorAsignaturaRepository().get_by_curso_asignatura(db, s.id)
-                assigned_teachers = [
-                    teachers_dict[t.profesor_id]
-                    for t in teachers_subject
-                    if t.profesor_id in teachers_dict
-                ]
-
-                if not assigned_teachers:
-                    assigned_teachers = teachers
-
-                subj_obj = Subject(
-                    id=s.id,  # Usamos el ID de la relación curso_asignatura
-                    name=subject.nombre,
-                    hours=s.horas_semanales,
-                    subject_type=subject.tipo,
-                    teachers=assigned_teachers
-                )
-
-                group_subjects.append(subj_obj)
-                subjects.append(subj_obj)
-                
-            group_obj = Group(
-                id=g.id,
-                name=f"{g.year} {speciality.nombre} {g.seccion}",
-                subjects=group_subjects
-            )
-            groups.append(group_obj)
-
-        print(f"✅ Carga exitosa desde BD: {len(teachers)} profesores, {len(groups)} cursos, {len(rooms)} salones.")
-    
-    finally:
-        db.close()
+data_handler = Data()
+data_handler.load_data()
+academic_hours_limits = data_handler.academic_hours_limits
+academic_hours = data_handler.academic_hours
+teachers = data_handler.teachers
+groups = data_handler.groups
+rooms = data_handler.rooms
+subjects = data_handler.subjects
 
 def random_start_hour(duration: int) -> int:
     # Elegimos un día existente
@@ -343,211 +189,6 @@ def create_population(size: int, events: list[Event]):
     
     return population
 
-def fitness(population: list[list[Event]]):
-    results = []
-    
-    for individual in population:
-        # Extraemos solo el score numérico desestimando las listas de fallas con ', _'
-        g_score, _ = groups_subjects(individual)
-        t_score, _ = teachers_subjects(individual)
-        r_score = rooms_groups(individual) # Esta quedó igual que antes
-        gap_score, _ = groups_gaps(individual)
-        sub_score, _ = subject_day(individual)
-        
-        total_score = g_score + t_score + r_score + gap_score + sub_score
-        results.append(total_score)
-
-    return results
-        
-
-def groups_subjects(individual: list[Event]):
-    score = 0
-    groups_occupation = {}
-    collisions = []
-
-    for event in individual:
-        if event.start_hour is None:
-            continue
-
-        for block in range(event.start_hour, event.start_hour + event.duration):
-            key = (event.group, block)
-
-            if key in groups_occupation:
-                existing_event = groups_occupation[key]
-                score += 200
-                collisions.append({
-                    "group": event.group,
-                    "block": block,
-                    "event_1": {"id": existing_event.id, "subject": existing_event.subject},
-                    "event_2": {"id": event.id, "subject": event.subject}
-                })
-            else:
-                groups_occupation[key] = event
-    
-    return score, collisions
-
-def teachers_subjects(individual: list[Event]):
-    score = 0
-    teachers_occupation = {}
-    collisions = [] 
-    # Conjunto para rastrear choques conceptuales únicos ya penalizados
-    # Guardará tuplas de (teacher_id, min_event_id, max_event_id)
-    penalized_pairs = set()
-
-    for event in individual:
-        if event.start_hour is None:
-            continue
-
-        for block in range(event.start_hour, event.start_hour + event.duration):
-            key = (event.teacher, block)
-
-            if key in teachers_occupation:
-                existing_event = teachers_occupation[key]
-                
-                # Identificadores ordenados para evitar contar (A, B) y (B, A) como diferentes
-                event_pair = (event.teacher, min(existing_event.id, event.id), max(existing_event.id, event.id))
-                
-                # Solo sumamos al score de fitness si es la primera vez que detectamos este choque de eventos
-                if event_pair not in penalized_pairs:
-                    score += 150
-                    penalized_pairs.add(event_pair)
-                
-                    # Opcional: El reporte detallado puede seguir mostrando todos los bloques 
-                    # o puedes filtrarlo aquí para que solo guarde una colisión conceptual.
-                    # Mantenerlo aquí registrará cada bloque; si prefieres un reporte compacto, 
-                    # puedes meter este append dentro del 'if event_pair not in penalized_pairs:'
-                    collisions.append({
-                        "teacher_id": event.teacher,
-                        "block": block,
-                        "event_1": {
-                            "id": existing_event.id,
-                            "subject": existing_event.subject,
-                            "group": existing_event.group
-                        },
-                        "event_2": {
-                            "id": event.id,
-                            "subject": event.subject,
-                            "group": event.group
-                        }
-                    })
-            else:
-                teachers_occupation[key] = event
-    
-    return score, collisions
-
-def rooms_groups(individual: list[Event]):
-    score = 0
-    rooms_occupation = {}
-
-    for event in individual:
-        for block in range(event.start_hour, event.start_hour + event.duration):
-            if event.room != None:
-                key = (event.room, block)
-
-                if key in rooms_occupation:
-                    score += 0 # 0 temporalmente hasta que sepa como se manejan los salones
-                else:
-                    rooms_occupation[key] = event
-    
-    return score
-
-def groups_gaps(individual: list[Event]):
-    score = 0
-    timetable_map = {}
-    gaps_report = []
-
-    for event in individual:
-        if event.start_hour is None:
-            continue
-
-        for block in range(event.start_hour, event.start_hour + event.duration):
-            # Obtenemos la hora académica mapeada con el slot_index
-            ah = academic_hours[block]
-            day = ah.day_index
-            
-            if event.group not in timetable_map:
-                timetable_map[event.group] = {}
-                
-            if day not in timetable_map[event.group]:
-                timetable_map[event.group][day] = set()
-                
-            # Guardamos el índice virtual (block) para medir huecos en la secuencia
-            timetable_map[event.group][day].add(block)
-
-    for group, days in timetable_map.items():
-        for day, occupied_hours in days.items():
-            if not occupied_hours:
-                continue
-            
-            first_block = min(occupied_hours)
-            last_block = max(occupied_hours)
-            gaps_count = 0
-            specific_hours = []
-
-            for block in range(first_block, last_block + 1):
-                if block not in occupied_hours:
-                    gaps_count += 1
-                    specific_hours.append(academic_hours[block].start_hour)
-            
-            if gaps_count > 0:
-                min_day_block = academic_hours_limits[day]["min"]
-                is_late_entry = first_block > min_day_block
-
-                if is_late_entry:
-                    score += gaps_count * 80
-                    gaps_report.append({
-                        "group": group,
-                        "day": day,
-                        "type": "Entrada tarde con baches (No permitido)",
-                        "gaps_count": gaps_count,
-                        "hours": specific_hours
-                    })
-                else:
-                    max_allowed_gaps = 2
-                    if gaps_count > max_allowed_gaps:
-                        score += (gaps_count - max_allowed_gaps) * 40
-                        gaps_report.append({
-                            "group": group,
-                            "day": day,
-                            "type": f"Exceso de horas libres (Permitido: {max_allowed_gaps})",
-                            "gaps_count": gaps_count,
-                            "hours": specific_hours
-                        })
-    return score, gaps_report
-
-def subject_day(individual: list[Event]):
-    score = 0
-    group_day_subjects = {}
-    subject_duplications = []
-
-    for event in individual:
-        if event.start_hour is None:
-            continue
-        
-        day = academic_hours[event.start_hour].day_index
-        
-        if event.group not in group_day_subjects:
-            group_day_subjects[event.group] = {}
-            
-        if day not in group_day_subjects[event.group]:
-            group_day_subjects[event.group][day] = {}
-            
-        # Si la materia ya fue registrada este día, guardamos la falla
-        if event.subject in group_day_subjects[event.group][day]:
-            score += 175
-            existing_event_id = group_day_subjects[event.group][day][event.subject]
-            subject_duplications.append({
-                "group": event.group,
-                "day": day,
-                "subject": event.subject,
-                "event_1_id": existing_event_id,
-                "event_2_id": event.id
-            })
-        else:
-            group_day_subjects[event.group][day][event.subject] = event.id
-
-    return score, subject_duplications
-
 def selection(population, size):
 
     population.sort(key=lambda x: x[0])
@@ -675,14 +316,12 @@ def mutation(individual: list[Event]):
 
 def main():
 
-    load_data()
-
     events = create_events()
     i = 0
     population = create_population(50, events)
 
-    while i < 2000:
-        scores = fitness(population)
+    while i < 1000:
+        scores = fitness(population, academic_hours, academic_hours_limits)
         fitness_population = list(zip(scores, population))
         if i == 0:
             print("Poblacion sin seleccionar")
@@ -699,7 +338,7 @@ def main():
         population = crossover(selected_population, 50)
         i += 1
     
-    scores = fitness(population)
+    scores = fitness(population, academic_hours, academic_hours_limits)
     fitness_population = list(zip(scores, population))
     fitness_population.sort(key=lambda x: x[0])
     print("generacion 100 ordenada")
@@ -782,8 +421,8 @@ def evaluate_and_report(best_individual: list[Event]):
     """
     g_score, group_collisions = groups_subjects(best_individual)
     t_score, teacher_collisions = teachers_subjects(best_individual)
-    gap_score, gaps_report = groups_gaps(best_individual)
-    sub_score, subject_duplications = subject_day(best_individual)
+    gap_score, gaps_report = groups_gaps(best_individual, academic_hours, academic_hours_limits)
+    sub_score, subject_duplications = subject_day(best_individual, academic_hours)
     
     report = {
         "total_fitness": g_score + t_score + gap_score + sub_score,

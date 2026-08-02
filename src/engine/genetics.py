@@ -14,9 +14,30 @@ groups = data_handler.groups
 rooms = data_handler.rooms
 subjects = data_handler.subjects
 
+TEACHERS_BY_ID = {t.id: t for t in teachers}
+SUBJECTS_BY_ID = {s.id: s for s in subjects}
+
+SORTED_DAYS = sorted(academic_hours_limits.keys())
+DAY_POSITIONS = {day: i for i, day in enumerate(SORTED_DAYS)}
+
+def fast_copy_event(event: Event) -> Event:
+    """Clonación manual ultrarrápida, reduciendo overhead de copy.deepcopy."""
+    new_e = Event.__new__(Event)
+    new_e.id = event.id
+    new_e.teacher = event.teacher
+    new_e.subject = event.subject
+    new_e.group = event.group
+    new_e.duration = event.duration
+    new_e.start_hour = event.start_hour
+    new_e.room = getattr(event, "room", None)
+    return new_e
+
+def fast_copy_timetable(timetable: list[Event]) -> list[Event]:
+    return [fast_copy_event(e) for e in timetable]
+
 def random_start_hour(duration: int) -> int:
     # Elegimos un día existente
-    day_idx = random.choice(list(academic_hours_limits.keys()))
+    day_idx = random.choice(SORTED_DAYS)
     min_idx = academic_hours_limits[day_idx]["min"]
     max_idx = academic_hours_limits[day_idx]["max"]
     
@@ -30,7 +51,7 @@ def random_start_hour(duration: int) -> int:
     return random.randint(min_idx, latest_hour)
 
 def is_teacher_available(teacher, start_hour: int, duration: int) -> bool:
-    teacher = next((t for t in teachers if t.id == teacher), None)
+    teacher = TEACHERS_BY_ID.get(teacher)
 
     if teacher is None:
         return False
@@ -54,23 +75,15 @@ def move_hour(start_hour_index: int, duration: int) -> int:
         return start_hour_index - 1
         
     # 2. Si llegamos al inicio del día, saltamos al día anterior
-    sorted_days = sorted(academic_hours_limits.keys())
-    pos_current_day = sorted_days.index(current_day)
+    pos_current_day = DAY_POSITIONS[current_day]
     
     if pos_current_day > 0:
-        previous_day = sorted_days[pos_current_day - 1]
-        max_idx_prev = academic_hours_limits[previous_day]["max"]
-        min_idx_prev = academic_hours_limits[previous_day]["min"]
-        
-        # Posicionamos al final del día anterior asegurando que quepa la duración
-        return max(min_idx_prev, max_idx_prev - duration + 1)
+        previous_day = SORTED_DAYS[pos_current_day - 1]
     else:
-        # Si estamos en el primer día (ej. Lunes), saltamos al último día disponible
-        latest_day = sorted_days[-1]
-        max_idx_lat = academic_hours_limits[latest_day]["max"]
-        min_idx_lat = academic_hours_limits[latest_day]["min"]
+        previous_day = SORTED_DAYS[-1]
         
-        return max(min_idx_lat, max_idx_lat - duration + 1)
+    limits_prev = academic_hours_limits[previous_day]
+    return max(limits_prev["min"], limits_prev["max"] - duration + 1)
 
 def create_events():
     event_list = []
@@ -84,15 +97,11 @@ def create_events():
             teacher = random.choice(subject.teachers)
 
             while left_hours > 0:
-                if left_hours > 2 and left_hours < 8:
-                    if left_hours == 4:
-                        duration = 2
-                    else:
-                        duration = random.randint(2, left_hours)
+                if 2 < left_hours < 8:
+                    duration = 2 if left_hours == 4 else random.randint(2, left_hours)
 
                 elif left_hours == 8:
-                    even_hours = [6, 8]
-                    duration = random.choice(even_hours)
+                    duration = random.choice([6, 8])
 
                 else:
                     duration = left_hours
@@ -109,7 +118,9 @@ def create_timetable(events: list[Event]):
     teachers_block = {}
     #physic_education = [16, 17, 18]
 
-    for event in events:
+    for original_event in events:
+        event = fast_copy_event(original_event)
+
         if event.group not in groups_block:
             groups_block[event.group] = set()
 
@@ -120,7 +131,7 @@ def create_timetable(events: list[Event]):
         start_hour = random_start_hour(event.duration)
 
         for _ in range(100):
-            event_hours = range(start_hour, start_hour + event.duration)
+            event_hours = set(range(start_hour, start_hour + event.duration))
 
             if (not groups_block[event.group].intersection(event_hours) and 
                 not teachers_block[event.teacher].intersection(event_hours) and 
@@ -140,7 +151,7 @@ def create_timetable(events: list[Event]):
         if not found_block:
             start_hour = random_start_hour(event.duration)
             for _ in range(100):
-                event_hours = range(start_hour, start_hour + event.duration)
+                event_hours = set(range(start_hour, start_hour + event.duration))
                 
                 if not groups_block[event.group].intersection(event_hours) and is_teacher_available(event.teacher, start_hour, event.duration):
                     event.start_hour = start_hour
@@ -155,17 +166,14 @@ def create_timetable(events: list[Event]):
             
             if not found_block:
                 possible_hours = []
-                teacher_obj = next((t for t in teachers if t.id == event.teacher), None)
+                teacher_obj = TEACHERS_BY_ID.get(event.teacher)
 
                 if teacher_obj:
                     for av in teacher_obj.availabilities:
                         for h in range(av.start_idx, (av.end_idx - event.duration) + 2):
                             possible_hours.append(h)
                 
-                if possible_hours:
-                    event.start_hour = random.choice(possible_hours)
-                else:
-                    event.start_hour = random_start_hour(event.duration)
+                event.start_hour = random.choice(possible_hours) if possible_hours else random_start_hour(event.duration)
 
                 # if event.subject not in physic_education:
                 #     event.room = random.choice(rooms).id
@@ -180,34 +188,24 @@ def create_timetable(events: list[Event]):
 
 
 def create_population(size: int, events: list[Event]):
-    population = []
-
-    for i in range(size):
-        original_timetable = create_timetable(events)
-        timetable_copy = copy.deepcopy(original_timetable)
-        population.append(timetable_copy)
-    
-    return population
+    return [create_timetable(events) for _ in range(size)]
 
 def selection(population, size):
-
     population.sort(key=lambda x: x[0])
-    selected_population = population[:size]
-
-    return selected_population
+    return population[:size]
 
 def crossover(selected_population: list[list[Event]], population_size: int):
     new_population = []
 
-    new_population.append(copy.deepcopy(selected_population[0][1]))
-    new_population.append(copy.deepcopy(selected_population[1][1]))
+    new_population.append(fast_copy_timetable(selected_population[0][1]))
+    new_population.append(fast_copy_timetable(selected_population[1][1]))
 
     while len(new_population) < population_size:
         parents = random.sample(selected_population, 2)
         p1, p2 = parents[0][1], parents[1][1]
         
         point = random.randint(1, len(p1) - 1)
-        child = copy.deepcopy(p1[:point] + p2[point:])
+        child = [fast_copy_event(e) for e in p1[:point]] + [fast_copy_event(e) for e in p2[point:]]
         
         child = mutation(child)
         new_population.append(child)
@@ -219,42 +217,34 @@ def mutation(individual: list[Event]):
 
     for event in individual:
         if random.random() < 0.02:
-            current_subject = next((s for s in subjects if s.id == event.subject), None)
+            current_subject = SUBJECTS_BY_ID.get(event.subject)
             available_teachers = []
+
             if current_subject:
                 # 1. Encontrar todos los bloques horarios actuales de esta materia para este grupo
                 # (Ya que al cambiar de profesor, se le cambiarán TODOS sus bloques asignados)
-                current_blocks_of_subject = []
-                for e in individual:
-                    if e.subject == event.subject and e.group == event.group and e.start_hour is not None:
-                        current_blocks_of_subject.append((e.start_hour, e.duration))
+                current_blocks = [
+                    (e.start_hour, e.duration) for e in individual 
+                    if e.subject == event.subject and e.group == event.group and e.start_hour is not None
+                ]
                 
                 # 2. Filtrar profesores candidatos
                 for t in current_subject.teachers:
                     if t.id == event.teacher:
                         continue
-                    
-                    # Verificamos si este profesor está disponible en TODOS los bloques de la materia
-                    is_available_for_all = True
-                    for start_h, duration in current_blocks_of_subject:
-                        if not is_teacher_available(t.id, start_h, duration):
-                            is_available_for_all = False
-                            break # Con un bloque en el que no pueda, queda descartado
-                    
-                    if is_available_for_all:
-                        available_teachers.append(t)
 
+                    # Verificamos si este profesor está disponible en TODOS los bloques de la materia
+                    if all(is_teacher_available(t.id, sh, dur) for sh, dur in current_blocks):
+                        available_teachers.append(t)
+    
             # DECISIÓN INTELIGENTE: Si hay profesores alternativos, tiramos una moneda (50/50).
             # Si el profesor es ÚNICO, lo obligamos a ir directamente a MUTAR HORA.
-            mutar_profesor = False
-            if available_teachers and random.choice([True, False]):
-                mutar_profesor = True
+            mutar_profesor = bool(available_teachers and random.getrandbits(1))
 
             if mutar_profesor:
                 # --- MUTAR PROFESOR ---
                 new_teacher = random.choice(available_teachers)
-                i_subject = event.subject
-                i_group = event.group
+                i_subject, i_group = event.subject, event.group
 
                 for e in individual:
                     if e.group > i_group:
@@ -280,7 +270,7 @@ def mutation(individual: list[Event]):
                 # Subimos los intentos a 100 para dar más margen de búsqueda limpia
                 for _ in range(100):
                     new_hour = random_start_hour(event.duration)
-                    hours_block = range(new_hour, new_hour + event.duration)
+                    hours_block = set(range(new_hour, new_hour + event.duration))
 
                     # Si no colisiona con las horas ocupadas globales Y el profesor está disponible en su contrato
                     if not taken_hours.intersection(hours_block) and is_teacher_available(event.teacher, new_hour, event.duration):
@@ -293,17 +283,14 @@ def mutation(individual: list[Event]):
                 # (aunque arriesguemos un choque de grupo que el fitness resolverá)
                 if not available_space:
                     valid_hours_for_prof = []
-                    teacher_obj = next((t for t in teachers if t.id == event.teacher), None)
+                    teacher_obj = TEACHERS_BY_ID.get(event.teacher)
                     
                     if teacher_obj:
                         for av in teacher_obj.availabilities:
                             max_start = av.end_idx - event.duration + 1
 
                             for h in range(av.start_idx, max_start + 1):
-                                day_start = academic_hours[h].day_index
-                                day_end = academic_hours[h + event.duration - 1].day_index
-
-                                if day_start == day_end:
+                                if academic_hours[h].day_index == academic_hours[h + event.duration - 1].day_index:
                                     valid_hours_for_prof.append(h)
                                 
                     if valid_hours_for_prof:
@@ -320,7 +307,7 @@ def main():
     i = 0
     population = create_population(50, events)
 
-    while i < 1000:
+    while i < 2000:
         scores = fitness(population, academic_hours, academic_hours_limits)
         fitness_population = list(zip(scores, population))
         if i == 0:

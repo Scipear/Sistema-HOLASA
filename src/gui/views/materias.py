@@ -5,16 +5,6 @@ from src.services.asignatura_service import AsignaturaService
 
 
 
-db_materias=[
-    {"id": 1, "nombre": "Matemáticas", "tipo": "Teórica", "horas": 4, "asignaciones": [{"carrera": "Electrónica (EO)", "secciones": 1}, {"carrera": "Electricidad (EL)", "secciones": 2}]},
-    {"id": 2, "nombre": "Física", "tipo": "Teórica", "horas": 3, "asignaciones": [{"carrera": "Máquinas y Herramientas (MM)", "secciones": 2}]},
-    {"id": 3, "nombre": "Laboratorio de Electrónica", "tipo": "Práctica", "horas": 2, "asignaciones": [{"carrera": "Electrónica (EO)", "secciones": 3}]},
-    {"id": 4, "nombre": "Taller de Maquinaria", "tipo": "Técnica", "horas": 3, "asignaciones": [{"carrera": "Máquinas y Herramientas (MM)", "secciones": 2}]},
-    {"id": 5, "nombre": "Lenguaje y Literatura", "tipo": "Teórica", "horas": 3, "asignaciones": []},
-    {"id": 6, "nombre": "Circuitos Eléctricos", "tipo": "Técnica", "horas": 4, "asignaciones": [{"carrera": "Electricidad (EL)", "secciones": 2}]},
-    {"id": 7, "nombre": "Educación Física", "tipo": "Práctica", "horas": 2, "asignaciones": []}
-]
-
 TIPOS_MATERIA=["Teórica", "Práctica", "Técnica"]
 
 COLOR_TIPO={
@@ -57,7 +47,9 @@ class MateriasView(ft.UserControl):
     def cargar_datos(self):
         self.tabla.rows.clear()
         try:
-            registros = self.asignatura_service.obtener_todas() # o obtener_todos()
+            # Se usa el repositorio interno del servicio o se maneja sesión según corresponda
+            db = self.asignatura_service.repository.get_session() if hasattr(self.asignatura_service.repository, "get_session") else None
+            registros = self.asignatura_service.obtener_todos(db)[cite: 3]
             for row in registros:
                 self.tabla.rows.append(
                     ft.DataRow(cells=[
@@ -76,6 +68,16 @@ class MateriasView(ft.UserControl):
 
 
 def vista_materias(on_volver_menu=None):
+    asignatura_service = AsignaturaService()
+
+    def obtener_sesion():
+        """Obtiene la sesión de base de datos desde el repositorio si está disponible."""
+        if hasattr(asignatura_service.repository, "get_session"):
+            return asignatura_service.repository.get_session()
+        elif hasattr(asignatura_service.repository, "Session"):
+            return asignatura_service.repository.Session()
+        return None
+
     estilo_tarjeta_oscura={
         "bgcolor": "#1E202D",
         "border_radius": 15,
@@ -161,9 +163,20 @@ def vista_materias(on_volver_menu=None):
             e.page.update()
             return
 
-        for m in db_materias:
-            if str(m["id"])!=id_actual.value:
-                if m["nombre"].lower()==nombre.lower():
+        db = obtener_sesion()
+        try:
+            registros_bd = asignatura_service.obtener_todos(db)[cite: 3]
+        except Exception:
+            registros_bd = []
+        finally:
+            if db and hasattr(db, "close"):
+                db.close()
+
+        for m in registros_bd:
+            m_id = str(getattr(m, "id", ""))
+            m_nombre = getattr(m, "nombre", "")
+            if m_id != id_actual.value:
+                if m_nombre.lower() == nombre.lower():
                     e.page.dialog=modal_advertencia
                     modal_advertencia.open=True
                     e.page.update()
@@ -191,16 +204,19 @@ def vista_materias(on_volver_menu=None):
             hrs=4
             
         es_nuevo=id_actual.value==""
-        if es_nuevo:
-            nuevo_id=max([m["id"] for m in db_materias], default=0)+1
-            db_materias.append({"id": nuevo_id, "nombre": nombre, "tipo": dd_tipo.value, "horas": hrs, "asignaciones": []})
-        else:
-            for m in db_materias:
-                if str(m["id"])==id_actual.value:
-                    m["nombre"]=nombre
-                    m["tipo"]=dd_tipo.value
-                    m["horas"]=hrs
+        db = obtener_sesion()
+        try:
+            if es_nuevo:
+                asignatura_service.crear(db, nombre=nombre, tipo=dd_tipo.value)[cite: 3]
+            else:
+                registro_id = int(id_actual.value)
+                asignatura_service.actualizar(db, id=registro_id, nombre=nombre, tipo=dd_tipo.value)[cite: 3]
             cerrar_modal_confirmacion(e)
+        except Exception as ex:
+            print(f"Error al guardar en base de datos: {ex}")
+        finally:
+            if db and hasattr(db, "close"):
+                db.close()
         
         cerrar_modal(e)
         cargar_datos()
@@ -275,19 +291,27 @@ def vista_materias(on_volver_menu=None):
     )
 
     def pedir_confirmacion_eliminar(mat, e):
+        mat_id = getattr(mat, "id", None)
+        mat_nombre = getattr(mat, "nombre", "")
         modal_confirmacion.title=ft.Text("¿Confirmar Eliminación?", weight=ft.FontWeight.BOLD, color=ft.colors.WHITE)
-        modal_confirmacion.content=ft.Text(f"¿Está seguro de que desea eliminar la asignatura '{mat['nombre']}'?", color="#A0A0B0")
+        modal_confirmacion.content=ft.Text(f"¿Está seguro de que desea eliminar la asignatura '{mat_nombre}'?", color="#A0A0B0")
         modal_confirmacion.actions=[
             ft.TextButton("No, Cancelar", on_click=cerrar_modal_confirmacion, style=ft.ButtonStyle(color="#A0A0B0")),
-            ft.ElevatedButton("Sí, Confirmar", on_click=lambda ex: ejecutar_eliminacion(mat["id"], ex), bgcolor="#E57373", color=ft.colors.WHITE, style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=10)))
+            ft.ElevatedButton("Sí, Confirmar", on_click=lambda ex: ejecutar_eliminacion(mat_id, ex), bgcolor="#E57373", color=ft.colors.WHITE, style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=10)))
         ]
         e.page.dialog=modal_confirmacion
         modal_confirmacion.open=True
         e.page.update()
 
     def ejecutar_eliminacion(mat_id, e):
-        global db_materias
-        db_materias=[m for m in db_materias if m["id"]!=mat_id]
+        db = obtener_sesion()
+        try:
+            asignatura_service.eliminar(db, mat_id)[cite: 3]
+        except Exception as ex:
+            print(f"Error al eliminar en base de datos: {ex}")
+        finally:
+            if db and hasattr(db, "close"):
+                db.close()
         cerrar_modal_confirmacion(e)
         cargar_datos()
         txt_buscar.value=""
@@ -303,10 +327,10 @@ def vista_materias(on_volver_menu=None):
         e.page.update()
 
     def abrir_modal_editar(mat, e):
-        id_actual.value=str(mat["id"])
-        txt_nombre.value=mat["nombre"]
-        dd_tipo.value=mat.get("tipo", "Teórica")
-        txt_horas.value=str(mat.get("horas", 4))
+        id_actual.value=str(getattr(mat, "id", ""))
+        txt_nombre.value=getattr(mat, "nombre", "")
+        dd_tipo.value=getattr(mat, "tipo", "Teórica")
+        txt_horas.value=str(getattr(mat, "horas", 4))
         e.page.dialog=modal_materia
         modal_materia.open=True
         e.page.update()
@@ -333,10 +357,20 @@ def vista_materias(on_volver_menu=None):
     def cargar_datos(filtro=""):
         tabla_materias.rows.clear()
         conteo={t: 0 for t in TIPOS_MATERIA}
+        db = obtener_sesion()
+        try:
+            registros = asignatura_service.obtener_todos(db)[cite: 3]
+        except Exception as ex:
+            print(f"Error al obtener registros: {ex}")
+            registros = []
+        finally:
+            if db and hasattr(db, "close"):
+                db.close()
 
-        for mat in db_materias:
-            tipo=mat.get("tipo", "Teórica")
-            nombre=mat["nombre"].lower()
+        for mat in registros:
+            tipo = getattr(mat, "tipo", "Teórica")
+            nombre_val = getattr(mat, "nombre", "")
+            nombre = nombre_val.lower()
             
             if tipo in conteo:
                 conteo[tipo]+=1
@@ -346,11 +380,12 @@ def vista_materias(on_volver_menu=None):
 
             bg, col=COLOR_TIPO.get(tipo, ("#2A2D3E", "#A0A0B0"))
             icono=ICONO_TIPO.get(tipo, ft.icons.BOOK)
+            horas_val = getattr(mat, "horas", 4)
 
             tabla_materias.rows.append(ft.DataRow(cells=[
                 ft.DataCell(ft.Row([
                     ft.Icon(icono, color=col, size=18),
-                    ft.Text(mat["nombre"], color=ft.colors.WHITE, weight=ft.FontWeight.W_500, expand=True)
+                    ft.Text(nombre_val, color=ft.colors.WHITE, weight=ft.FontWeight.W_500, expand=True)
                 ], expand=True)),
                 ft.DataCell(ft.Container(
                     content=ft.Text(tipo, size=12, color=col, weight=ft.FontWeight.BOLD),
@@ -358,7 +393,7 @@ def vista_materias(on_volver_menu=None):
                     padding=ft.padding.symmetric(horizontal=12, vertical=5),
                     border_radius=10
                 )),
-                ft.DataCell(ft.Text(f"{mat.get('horas', 0)} hrs", color=ft.colors.WHITE, weight=ft.FontWeight.W_400)),
+                ft.DataCell(ft.Text(f"{horas_val} hrs", color=ft.colors.WHITE, weight=ft.FontWeight.W_400)),
                 ft.DataCell(ft.Row([
                     ft.Container(
                         content=ft.IconButton(ft.icons.EDIT, icon_color="#A0A0B0", icon_size=16,
@@ -373,7 +408,7 @@ def vista_materias(on_volver_menu=None):
                 ], spacing=10))
             ]))
 
-        txt_total.value=f"Asignaturas registradas: {len(db_materias)}"
+        txt_total.value=f"Asignaturas registradas: {len(registros)}"
         for t in TIPOS_MATERIA:
             contadores_tipo[t].value=str(conteo[t])
 

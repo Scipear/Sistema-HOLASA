@@ -1,38 +1,6 @@
 import flet as ft
-
-
-
-
+from src.database.connection import SessionLocal
 from src.services.curso_service import CursoService
-
-
-
-
-
-db_cursos = [
-    {
-        "id": 1, "year": "4to", "seccion": "A", "mencion": "Electrónica", "codigo_mencion": "EO",
-        "asignaturas": [
-            {"nombre": "Matemáticas", "tipo": "Teórica", "horas": 4},
-            {"nombre": "Sistemas Digitales", "tipo": "Técnica", "horas": 3},
-            {"nombre": "Física", "tipo": "Teórica", "horas": 3},
-        ]
-    },
-    {
-        "id": 2, "year": "4to", "seccion": "B", "mencion": "Electrónica", "codigo_mencion": "EO",
-        "asignaturas": [
-            {"nombre": "Matemáticas", "tipo": "Teórica", "horas": 4},
-            {"nombre": "Circuitos Eléctricos", "tipo": "Técnica", "horas": 4},
-        ]
-    },
-    {
-        "id": 3, "year": "4to", "seccion": "A", "mencion": "Electricidad", "codigo_mencion": "EL",
-        "asignaturas": [
-            {"nombre": "Circuitos Eléctricos", "tipo": "Técnica", "horas": 4},
-            {"nombre": "Lenguaje y Literatura", "tipo": "Teórica", "horas": 3},
-        ]
-    },
-]
 
 db_menciones_disp = [
     {"nombre": "Electrónica", "codigo": "EO"},
@@ -64,49 +32,28 @@ COLOR_TIPO = {
 }
 
 
-
-
-
-
-class CursosView(ft.UserControl):
-    def __init__(self):
-        super().__init__()
-        self.curso_service = CursoService()
-        self.tabla = ft.DataTable(
-            columns=[
-                ft.DataColumn(ft.Text("ID")),
-                ft.DataColumn(ft.Text("Semestre/Nombre")),
-            ],
-            rows=[]
-        )
-
-    def build(self):
-        self.cargar_datos()
-        return ft.Column([
-            ft.Text("Gestión de Cursos", size=24, weight=ft.FontWeight.BOLD),
-            self.tabla
-        ])
-
-    def cargar_datos(self):
-        self.tabla.rows.clear()
-        try:
-            registros = self.curso_service.obtener_todos()
-            for row in registros:
-                self.tabla.rows.append(
-                    ft.DataRow(cells=[
-                        ft.DataCell(ft.Text(str(row.id))),
-                        ft.DataCell(ft.Text(str(row.nombre))),
-                    ])
-                )
-            self.update()
-        except Exception as e:
-            print(f"Error en cursos: {e}")
-
-
-
-
-
 def vista_cursos():
+    curso_service = CursoService()
+    
+    # Lista interna reflejando los registros de la base de datos a través del servicio
+    db_cursos = []
+    db = SessionLocal()
+    try:
+        registros_bd = curso_service.obtener_todos(db)
+        for r in registros_bd:
+            db_cursos.append({
+                "id": r.id,
+                "year": r.year,
+                "seccion": r.seccion,
+                "mencion": getattr(r, "mencion", "General"),
+                "codigo_mencion": getattr(r, "codigo_mencion", ""),
+                "asignaturas": getattr(r, "asignaturas", [])
+            })
+    except Exception as e:
+        print(f"Error cargando desde BD: {e}")
+    finally:
+        db.close()
+
     estilo_tarjeta_oscura = {
         "bgcolor": "#1E202D",
         "border_radius": 10,
@@ -269,32 +216,32 @@ def vista_cursos():
         e.page.update()
 
     def confirmar_guardar_curso(e):
-        es_duplicado=False
-        id_form=str(id_actual.value).strip()
-        year_form=str(dd_year.value).strip()
-        seccion_form=str(dd_seccion.value).strip()
-        mencion_form=str(dd_mencion.value).strip()
+        es_duplicado = False
+        id_form = str(id_actual.value).strip()
+        year_form = str(dd_year.value).strip()
+        seccion_form = str(dd_seccion.value).strip()
+        mencion_form = str(dd_mencion.value).strip()
         
-        if mencion_form=="__nueva__":
-            mencion_form=str(txt_nueva_mencion.value).strip()
+        if mencion_form == "__nueva__":
+            mencion_form = str(txt_nueva_mencion.value).strip()
         
         for c in db_cursos:
-            if str(c["year"]).strip()==year_form and str(c["seccion"]).strip()==seccion_form and str(c["mencion"]).strip()==mencion_form:
-                if id_form=="":
-                    es_duplicado=True
+            if str(c["year"]).strip() == year_form and str(c["seccion"]).strip() == seccion_form and str(c["mencion"]).strip() == mencion_form:
+                if id_form == "":
+                    es_duplicado = True
                     break
-                elif str(c["id"]).strip()!=id_form:
-                    es_duplicado=True
+                elif str(c["id"]).strip() != id_form:
+                    es_duplicado = True
                     break
         
         if es_duplicado:
-            e.page.dialog=modal_advertencia
-            modal_advertencia.open=True
+            e.page.dialog = modal_advertencia
+            modal_advertencia.open = True
             e.page.update()
             return
 
-        modal_curso.open=False
-        if id_form!="":
+        modal_curso.open = False
+        if id_form != "":
             abrir_modal_confirmar_accion(
                 "¿Confirmar Edición?",
                 "¿Está seguro de que desea guardar los cambios realizados en este curso?",
@@ -305,41 +252,67 @@ def vista_cursos():
         else:
             ejecutar_guardado(e)
 
+    def sincronizar_con_bd():
+        """Guarda todos los cambios realizados en la lista local de vuelta a la base de datos."""
+        db = SessionLocal()
+        try:
+            existentes = curso_service.obtener_todos(db)
+            ids_actuales = [c["id"] for c in db_cursos if isinstance(c["id"], int)]
+            
+            # Eliminar los que ya no están
+            for ex in existentes:
+                if ex.id not in ids_actuales:
+                    curso_service.eliminar(db, ex.id)
+            
+            # Crear o actualizar
+            for c in db_cursos:
+                if isinstance(c["id"], int) and any(ex.id == c["id"] for ex in existentes):
+                    curso_service.actualizar(db, c["id"], seccion=c["seccion"], year=c["year"])
+                else:
+                    nuevo = curso_service.crear(db, seccion=c["seccion"], year=c["year"])
+                    c["id"] = nuevo.id
+        except Exception as ex:
+            print(f"Error sincronizando con BD: {ex}")
+        finally:
+            db.close()
+
     def ejecutar_guardado(e):
-        mencion_nombre=None
-        if dd_mencion.value=="__nueva__":
-            mencion_nombre=txt_nueva_mencion.value.strip()
-            codigo=txt_codigo_mencion.value.strip().upper()
+        mencion_nombre = None
+        if dd_mencion.value == "__nueva__":
+            mencion_nombre = txt_nueva_mencion.value.strip()
+            codigo = txt_codigo_mencion.value.strip().upper()
             if not mencion_nombre:
                 return
-            db_menciones_disp.append({"nombre":mencion_nombre,"codigo":codigo})
+            db_menciones_disp.append({"nombre": mencion_nombre, "codigo": codigo})
             actualizar_dd_menciones()
         else:
-            mencion_nombre=dd_mencion.value
-        mencion_obj=next((m for m in db_menciones_disp if m["nombre"]==mencion_nombre),{})
-        codigo_mencion=mencion_obj.get("codigo","")
-        if id_actual.value=="":
-            nuevo_id=max([c["id"] for c in db_cursos],default=0)+1
+            mencion_nombre = dd_mencion.value
+        mencion_obj = next((m for m in db_menciones_disp if m["nombre"] == mencion_nombre), {})
+        codigo_mencion = mencion_obj.get("codigo", "")
+        
+        if id_actual.value == "":
+            nuevo_id = max([c["id"] for c in db_cursos if isinstance(c["id"], int)], default=0) + 1
             db_cursos.append({
-                "id":nuevo_id,
-                "year":dd_year.value,
-                "seccion":dd_seccion.value,
-                "mencion":mencion_nombre,
-                "codigo_mencion":codigo_mencion,
-                "asignaturas":asignaturas_temp.copy()
+                "id": nuevo_id,
+                "year": dd_year.value,
+                "seccion": dd_seccion.value,
+                "mencion": mencion_nombre,
+                "codigo_mencion": codigo_mencion,
+                "asignaturas": asignaturas_temp.copy()
             })
         else:
             for c in db_cursos:
-                if str(c["id"])==str(id_actual.value):
-                    c["year"]=dd_year.value
-                    c["seccion"]=dd_seccion.value
-                    c["mencion"]=mencion_nombre
-                    c["codigo_mencion"]=codigo_mencion
-                    c["asignaturas"]=asignaturas_temp.copy()
+                if str(c["id"]) == str(id_actual.value):
+                    c["year"] = dd_year.value
+                    c["seccion"] = dd_seccion.value
+                    c["mencion"] = mencion_nombre
+                    c["codigo_mencion"] = codigo_mencion
+                    c["asignaturas"] = asignaturas_temp.copy()
         
+        sincronizar_con_bd()
         cargar_grilla(txt_buscar.value.lower())
-        e.page.dialog=modal_exito
-        modal_exito.open=True
+        e.page.dialog = modal_exito
+        modal_exito.open = True
         e.page.update()
 
     modal_curso = ft.AlertDialog(
@@ -392,19 +365,19 @@ def vista_cursos():
     )
 
     def abrir_modal_confirmar_accion(titulo, mensaje, color_btn, accion_si, e):
-        modal_confirmacion.title=ft.Text(titulo,weight=ft.FontWeight.BOLD,color=ft.colors.WHITE)
-        modal_confirmacion.content=ft.Text(mensaje,color="#A0A0B0")
+        modal_confirmacion.title = ft.Text(titulo, weight=ft.FontWeight.BOLD, color=ft.colors.WHITE)
+        modal_confirmacion.content = ft.Text(mensaje, color="#A0A0B0")
         def click_si(ex):
-            modal_confirmacion.open=False
+            modal_confirmacion.open = False
             ex.page.update()
             accion_si(ex)
 
-        modal_confirmacion.actions=[
-            ft.TextButton("No, Cancelar",on_click=lambda ex: cerrar_modal_confirmacion(ex),style=ft.ButtonStyle(color="#A0A0B0")),
-            ft.ElevatedButton("Sí, Confirmar",on_click=click_si,bgcolor=color_btn,color=ft.colors.WHITE,style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=10)))
+        modal_confirmacion.actions = [
+            ft.TextButton("No, Cancelar", on_click=lambda ex: cerrar_modal_confirmacion(ex), style=ft.ButtonStyle(color="#A0A0B0")),
+            ft.ElevatedButton("Sí, Confirmar", on_click=click_si, bgcolor=color_btn, color=ft.colors.WHITE, style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=10)))
         ]
-        e.page.dialog=modal_confirmacion
-        modal_confirmacion.open=True
+        e.page.dialog = modal_confirmacion
+        modal_confirmacion.open = True
         e.page.update()
 
     def cerrar_modal_confirmacion(e):
@@ -421,8 +394,9 @@ def vista_cursos():
         )
 
     def ejecutar_eliminacion(cur_id, e):
-        global db_cursos
+        nonlocal db_cursos
         db_cursos = [c for c in db_cursos if c["id"] != cur_id]
+        sincronizar_con_bd()
         cargar_grilla(txt_buscar.value.lower())
         e.page.update()
 
@@ -487,8 +461,8 @@ def vista_cursos():
         total_asig = 0
         cursos_visibles = 0
         for cur in db_cursos:
-            year_str = cur["year"].lower()
-            seccion_str = cur["seccion"].lower()
+            year_str = str(cur["year"]).lower()
+            seccion_str = str(cur["seccion"]).lower()
             
             if filtro and (filtro not in year_str and filtro not in seccion_str):
                 continue

@@ -1,5 +1,10 @@
 import flet as ft
 
+
+from src.services.asignatura_service import AsignaturaService
+
+
+
 db_materias=[
     {"id": 1, "nombre": "Matemáticas", "tipo": "Teórica", "horas": 4, "asignaciones": [{"carrera": "Electrónica (EO)", "secciones": 1}, {"carrera": "Electricidad (EL)", "secciones": 2}]},
     {"id": 2, "nombre": "Física", "tipo": "Teórica", "horas": 3, "asignaciones": [{"carrera": "Máquinas y Herramientas (MM)", "secciones": 2}]},
@@ -23,6 +28,52 @@ ICONO_TIPO={
     "Práctica": ft.icons.SCIENCE,
     "Técnica": ft.icons.BUILD,
 }
+
+
+
+
+
+
+
+class MateriasView(ft.UserControl):
+    def __init__(self):
+        super().__init__()
+        self.asignatura_service = AsignaturaService()
+        self.tabla = ft.DataTable(
+            columns=[
+                ft.DataColumn(ft.Text("ID")),
+                ft.DataColumn(ft.Text("Nombre de Asignatura")),
+            ],
+            rows=[]
+        )
+
+    def build(self):
+        self.cargar_datos()
+        return ft.Column([
+            ft.Text("Gestión de Materias", size=24, weight=ft.FontWeight.BOLD),
+            self.tabla
+        ])
+
+    def cargar_datos(self):
+        self.tabla.rows.clear()
+        try:
+            registros = self.asignatura_service.obtener_todas() # o obtener_todos()
+            for row in registros:
+                self.tabla.rows.append(
+                    ft.DataRow(cells=[
+                        ft.DataCell(ft.Text(str(row.id))),
+                        ft.DataCell(ft.Text(str(row.nombre))),
+                    ])
+                )
+            self.update()
+        except Exception as e:
+            print(f"Error en materias: {e}")
+
+
+
+
+
+
 
 def vista_materias(on_volver_menu=None):
     estilo_tarjeta_oscura={

@@ -1,5 +1,15 @@
 import flet as ft
 
+from src.services.mencion_service import MencionService
+
+
+
+
+
+
+
+
+
 db_menciones=[
     {"id": 1, "nombre": "Electrónica", "codigo": "EO"},
     {"id": 2, "nombre": "Electricidad", "codigo": "EL"},
@@ -7,6 +17,53 @@ db_menciones=[
     {"id": 4, "nombre": "Refrigeración", "codigo": "MT"},
     {"id": 5, "nombre": "Metalmecánica", "codigo": "ME"},
 ]
+
+
+
+
+
+
+
+class MencionesView(ft.UserControl):
+    def __init__(self):
+        super().__init__()
+        self.mencion_service = MencionService()
+        self.tabla = ft.DataTable(
+            columns=[
+                ft.DataColumn(ft.Text("ID")),
+                ft.DataColumn(ft.Text("Nombre de la Mención")),
+            ],
+            rows=[]
+        )
+
+    def build(self):
+        self.cargar_datos()
+        return ft.Column([
+            ft.Text("Gestión de Menciones", size=24, weight=ft.FontWeight.BOLD),
+            self.tabla
+        ])
+
+    def cargar_datos(self):
+        self.tabla.rows.clear()
+        try:
+            registros = self.mencion_service.obtener_todas()
+            for row in registros:
+                self.tabla.rows.append(
+                    ft.DataRow(cells=[
+                        ft.DataCell(ft.Text(str(row.id))),
+                        ft.DataCell(ft.Text(str(row.nombre))),
+                    ])
+                )
+            self.update()
+        except Exception as e:
+            print(f"Error en menciones: {e}")
+
+
+
+
+
+
+            
 
 def vista_menciones(on_volver_menu=None):
     estilo_tarjeta_oscura={

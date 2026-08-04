@@ -1,13 +1,19 @@
 import flet as ft
-from dashboard import vista_dashboard
-from profesores import vista_profesores
-from materias import vista_materias
-from menciones import vista_menciones
-from sesiones import vista_sesiones
-from salones import vista_salones
-from cursos import vista_cursos
-from generacion import vista_generacion
-from horario import vista_horario
+
+
+from src.gui.views.dashboard import vista_dashboard
+from src.gui.views.profesores import vista_profesores
+from src.gui.views.materias import vista_materias
+from src.gui.views.menciones import vista_menciones
+from src.gui.views.sesiones import vista_sesiones
+from src.gui.views.salones import vista_salones
+from src.gui.views.cursos import vista_cursos
+from src.gui.views.generacion import vista_generacion
+from src.gui.views.horario import vista_horario
+
+
+
+
 
 NAV_ITEMS = [
     {"id": "dashboard",  "label": "Dashboard",    "icono": ft.icons.DASHBOARD_OUTLINED,     "icono_sel": ft.icons.DASHBOARD},

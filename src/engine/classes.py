@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 class Teacher():
     def __init__(self, id: int, name: str, last_name: str, availabilities: list[Academic_Hour]):
         self.id = id

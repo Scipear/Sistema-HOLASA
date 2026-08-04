@@ -1,5 +1,13 @@
 import flet as ft
 
+
+
+from src.services.salon_service import SalonService
+
+
+
+
+
 db_salones=[
     {"id": 1, "nombre": "Aula 1", "tipo": "Teórica"},
     {"id": 2, "nombre": "Aula 2", "tipo": "Teórica"},
@@ -27,6 +35,57 @@ ICONO_TIPO={
     "Deportivo": ft.icons.SPORTS_SOCCER,
     "Otro": ft.icons.ROOM,
 }
+
+
+
+
+
+
+class SalonesView(ft.UserControl):
+    def __init__(self):
+        super().__init__()
+        self.salon_service = SalonService()
+        self.tabla = ft.DataTable(
+            columns=[
+                ft.DataColumn(ft.Text("ID")),
+                ft.DataColumn(ft.Text("Nombre/Código")),
+                ft.DataColumn(ft.Text("Capacidad")),
+            ],
+            rows=[]
+        )
+
+    def build(self):
+        self.cargar_datos()
+        return ft.Column([
+            ft.Text("Gestión de Salones", size=24, weight=ft.FontWeight.BOLD),
+            self.tabla
+        ])
+
+    def cargar_datos(self):
+        self.tabla.rows.clear()
+        try:
+            registros = self.salon_service.obtener_todos()
+            for row in registros:
+                self.tabla.rows.append(
+                    ft.DataRow(cells=[
+                        ft.DataCell(ft.Text(str(row.id))),
+                        ft.DataCell(ft.Text(str(row.nombre))),
+                        ft.DataCell(ft.Text(str(row.capacidad))),
+                    ])
+                )
+            self.update()
+        except Exception as e:
+            print(f"Error en salones: {e}")
+
+
+
+
+
+
+
+
+
+
 
 def vista_salones(on_volver_menu=None):
     estilo_tarjeta_oscura={

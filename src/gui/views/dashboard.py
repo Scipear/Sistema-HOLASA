@@ -1,6 +1,59 @@
 import flet as ft
 
+
+
+# --- NUEVO CÓDIGO A SUMAR: Importación de servicios ---
+from src.services.profesor_service import ProfesorService
+from src.services.curso_service import CursoService
+from src.services.asignatura_service import AsignaturaService
+from src.services.salon_service import SalonService
+from src.services.mencion_service import MencionService
+
+
+
+
+
+
 def vista_dashboard(on_navigate=None):
+
+
+
+    # --- NUEVO CÓDIGO A SUMAR: Instancia y conteo para verificar conexiones ---
+    profesor_service = ProfesorService()
+    curso_service = CursoService()
+    asignatura_service = AsignaturaService()
+    salon_service = SalonService()
+    mencion_service = MencionService()
+
+    try:
+        total_profesores = str(len(profesor_service.obtener_todos()))
+    except Exception:
+        total_profesores = "0"
+
+    try:
+        total_cursos = str(len(curso_service.obtener_todos()))
+    except Exception:
+        total_cursos = "0"
+
+    try:
+        total_asignaturas = str(len(asignatura_service.obtener_todas()))
+    except Exception:
+        total_asignaturas = "0"
+
+    try:
+        total_salones = str(len(salon_service.obtener_todos()))
+    except Exception:
+        total_salones = "0"
+
+    try:
+        total_menciones = str(len(mencion_service.obtener_todas()))
+    except Exception:
+        total_menciones = "0"
+
+
+
+
+
     estilo_tarjeta_oscura = {
         "bgcolor": "#1E202D",
         "border_radius": 15,
@@ -141,14 +194,14 @@ def vista_dashboard(on_navigate=None):
                 ft.Container(
                     bgcolor="#1A2A20", border_radius=10, padding=12, expand=True,
                     content=ft.Column([
-                        ft.Text("42", size=26, weight=ft.FontWeight.BOLD, color="#439A5D"),
+                        ft.Text(total_profesores, size=26, weight=ft.FontWeight.BOLD, color="#439A5D"),
                         ft.Text("Profesores", size=11, color="#439A5D")
                     ], spacing=2, horizontal_alignment=ft.CrossAxisAlignment.CENTER)
                 ),
                 ft.Container(
                     bgcolor="#1A3A5C", border_radius=10, padding=12, expand=True,
                     content=ft.Column([
-                        ft.Text("7", size=26, weight=ft.FontWeight.BOLD, color="#5B9BD5"),
+                        ft.Text(total_cursos, size=26, weight=ft.FontWeight.BOLD, color="#5B9BD5"),
                         ft.Text("Cursos", size=11, color="#5B9BD5")
                     ], spacing=2, horizontal_alignment=ft.CrossAxisAlignment.CENTER)
                 ),
@@ -157,14 +210,14 @@ def vista_dashboard(on_navigate=None):
                 ft.Container(
                     bgcolor="#332415", border_radius=10, padding=12, expand=True,
                     content=ft.Column([
-                        ft.Text("8", size=26, weight=ft.FontWeight.BOLD, color="#E69138"),
+                        ft.Text(total_asignaturas, size=26, weight=ft.FontWeight.BOLD, color="#E69138"),
                         ft.Text("Asignaturas", size=11, color="#E69138")
                     ], spacing=2, horizontal_alignment=ft.CrossAxisAlignment.CENTER)
                 ),
                 ft.Container(
                     bgcolor="#2A2D3E", border_radius=10, padding=12, expand=True,
                     content=ft.Column([
-                        ft.Text("7", size=26, weight=ft.FontWeight.BOLD, color="#C0C0C0"),
+                        ft.Text(total_salones, size=26, weight=ft.FontWeight.BOLD, color="#C0C0C0"),
                         ft.Text("Salones", size=11, color="#C0C0C0")
                     ], spacing=2, horizontal_alignment=ft.CrossAxisAlignment.CENTER)
                 ),
@@ -173,7 +226,7 @@ def vista_dashboard(on_navigate=None):
             ft.Row([
                 ft.Container(content=ft.Text("2 Docentes con Prioridad", color="#E69138", size=11),
                              bgcolor="#332415", padding=8, border_radius=8),
-                ft.Container(content=ft.Text("5 Menciones activas", color="#76C7C0", size=11),
+                ft.Container(content=ft.Text(f"{total_menciones} Menciones activas", color="#76C7C0", size=11),
                              bgcolor="#1A3A38", padding=8, border_radius=8)
             ], spacing=8, wrap=True),
         ], spacing=10)

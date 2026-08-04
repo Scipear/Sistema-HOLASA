@@ -1,5 +1,12 @@
 import flet as ft
 
+
+
+from src.services.sesion_service import SesionService
+
+
+
+
 DIAS_SEMANA=["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"]
 HORAS_DISPONIBLES=[
     "7:00", "7:40", "8:20", "8:30", "9:10", "9:50",
@@ -22,6 +29,50 @@ COLOR_DIA={
     "Jueves": ("#1A3A38", "#76C7C0"),
     "Viernes": ("#3A1A30", "#D988B9"),
 }
+
+
+
+class SesionesView(ft.UserControl):
+    def __init__(self):
+        super().__init__()
+        self.sesion_service = SesionService()
+        self.tabla = ft.DataTable(
+            columns=[
+                ft.DataColumn(ft.Text("ID")),
+                ft.DataColumn(ft.Text("Tipo de Sesión")),
+                ft.DataColumn(ft.Text("Duración")),
+            ],
+            rows=[]
+        )
+
+    def build(self):
+        self.cargar_datos()
+        return ft.Column([
+            ft.Text("Gestión de Sesiones", size=24, weight=ft.FontWeight.BOLD),
+            self.tabla
+        ])
+
+    def cargar_datos(self):
+        self.tabla.rows.clear()
+        try:
+            registros = self.sesion_service.obtener_todas() # o obtener_todos()
+            for row in registros:
+                self.tabla.rows.append(
+                    ft.DataRow(cells=[
+                        ft.DataCell(ft.Text(str(row.id))),
+                        ft.DataCell(ft.Text(str(row.tipo))),
+                        ft.DataCell(ft.Text(str(row.duracion))),
+                    ])
+                )
+            self.update()
+        except Exception as e:
+            print(f"Error en sesiones: {e}")
+
+
+
+
+
+
 
 def vista_sesiones(on_volver_menu=None):
     estilo_tarjeta_oscura={

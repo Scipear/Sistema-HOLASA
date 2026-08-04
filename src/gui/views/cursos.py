@@ -1,5 +1,14 @@
 import flet as ft
 
+
+
+
+from src.services.curso_service import CursoService
+
+
+
+
+
 db_cursos = [
     {
         "id": 1, "year": "4to", "seccion": "A", "mencion": "Electrónica", "codigo_mencion": "EO",
@@ -53,6 +62,49 @@ COLOR_TIPO = {
     "Práctica": ("#1A2A20", "#439A5D"),
     "Técnica":  ("#332415", "#E69138"),
 }
+
+
+
+
+
+
+class CursosView(ft.UserControl):
+    def __init__(self):
+        super().__init__()
+        self.curso_service = CursoService()
+        self.tabla = ft.DataTable(
+            columns=[
+                ft.DataColumn(ft.Text("ID")),
+                ft.DataColumn(ft.Text("Semestre/Nombre")),
+            ],
+            rows=[]
+        )
+
+    def build(self):
+        self.cargar_datos()
+        return ft.Column([
+            ft.Text("Gestión de Cursos", size=24, weight=ft.FontWeight.BOLD),
+            self.tabla
+        ])
+
+    def cargar_datos(self):
+        self.tabla.rows.clear()
+        try:
+            registros = self.curso_service.obtener_todos()
+            for row in registros:
+                self.tabla.rows.append(
+                    ft.DataRow(cells=[
+                        ft.DataCell(ft.Text(str(row.id))),
+                        ft.DataCell(ft.Text(str(row.nombre))),
+                    ])
+                )
+            self.update()
+        except Exception as e:
+            print(f"Error en cursos: {e}")
+
+
+
+
 
 def vista_cursos():
     estilo_tarjeta_oscura = {

@@ -1,5 +1,16 @@
 import flet as ft
 
+
+
+from src.services.profesor_service import ProfesorService
+
+
+
+
+
+
+
+
 db_profesores=[
     {"id": 1, "nombre": "Maria", "apellido": "Navarro", "telefono": "04141234567", "correo": "maria.navarro@email.com", "estado": "Activo", "asignaturas": ["Matemática - 1er Año", "Física - 2do Año"], "disponibilidad": {"Lunes": {"inicio": "07:00", "fin": "11:50"}, "Martes": {"inicio": "08:30", "fin": "12:50"}}},
     {"id": 2, "nombre": "Francisco", "apellido": "Isea", "telefono": "", "correo": "francisco.isea@email.com", "estado": "Activo", "asignaturas": ["Telecomunicaciones - 4to Año"], "disponibilidad": {"Miércoles": {"inicio": "07:00", "fin": "09:50"}}},
@@ -9,6 +20,56 @@ opciones_estado=["Activo", "Inactivo"]
 opciones_dias=["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"]
 opciones_horas=["07:00", "07:40", "08:30", "09:10", "09:50", "10:30", "11:10", "11:50", "12:10", "12:50", "13:30", "14:10"]
 opciones_materias=["Matemática - 1er Año", "Física - 2do Año", "Química - 3er Año", "Castellano - 4to Año", "Telecomunicaciones - 4to Año", "Dibujo Técnico - 5to Año"]
+
+
+
+
+
+class ProfesoresView(ft.UserControl):
+    def __init__(self):
+        super().__init__()
+        self.profesor_service = ProfesorService()
+        self.tabla = ft.DataTable(
+            columns=[
+                ft.DataColumn(ft.Text("ID")),
+                ft.DataColumn(ft.Text("Nombre")),
+                ft.DataColumn(ft.Text("Apellido")),
+            ],
+            rows=[]
+        )
+
+    def build(self):
+        self.cargar_datos()
+        return ft.Column([
+            ft.Text("Gestión de Profesores", size=24, weight=ft.FontWeight.BOLD),
+            self.tabla
+        ])
+
+    def cargar_datos(self):
+        self.tabla.rows.clear()
+        try:
+            registros = self.profesor_service.obtener_todos()
+            for row in registros:
+                self.tabla.rows.append(
+                    ft.DataRow(cells=[
+                        ft.DataCell(ft.Text(str(row.id))),
+                        ft.DataCell(ft.Text(str(row.nombre))),
+                        ft.DataCell(ft.Text(str(row.apellido))),
+                    ])
+                )
+            self.update()
+        except Exception as e:
+            print(f"Error en profesores: {e}")
+
+
+
+
+
+
+
+
+
+
 
 def vista_profesores(on_volver_menu=None):
     estilo_tarjeta_oscura={

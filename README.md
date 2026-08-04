@@ -1,6 +1,6 @@
 # Sistema HOLASA (Horarios de La Salle)
 
-## 🛠️ Requerimientos Previos
+##  Requerimientos Previos
 
 * **Python 3.12.0 o superior**
 * **SQLite**

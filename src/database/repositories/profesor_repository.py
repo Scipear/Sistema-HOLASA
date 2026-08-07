@@ -32,15 +32,3 @@ class ProfesorRepository(BaseRepository):
             Lista de profesores con estado activo.
         """
         return db.query(self.model_class).filter(self.model_class.estado == True).all()
-
-    def get_by_correo(self, db: Session, correo: str):
-        """Obtiene un profesor por su correo electrónico.
-
-        Args:
-            db: Sesión activa de base de datos.
-            correo: Correo electrónico a buscar.
-
-        Returns:
-            El profesor encontrado o None si no existe.
-        """
-        return db.query(self.model_class).filter(self.model_class.correo == correo).first()

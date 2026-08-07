@@ -46,16 +46,16 @@ def test_actualizar_asignatura(db_session):
     assert obj.tipo == "**MODIFICADO**"
 
 
-def test_actualizar_profesor(db_session):
-    repo = ProfesorRepository()
-    todos = repo.get_all(db_session)
-    assert len(todos) > 0
-    obj = repo.update(
-        db_session, todos[0].id, telefono="000-0000"
-    )
-    db_session.commit()
-    assert obj is not None
-    assert obj.telefono == "000-0000"
+# def test_actualizar_profesor(db_session):
+#     repo = ProfesorRepository()
+#     todos = repo.get_all(db_session)
+#     assert len(todos) > 0
+#     obj = repo.update(
+#         db_session, todos[0].id, telefono="000-0000"
+#     )
+#     db_session.commit()
+#     assert obj is not None
+#     assert obj.telefono == "000-0000"
 
 
 def test_actualizar_sesion(db_session):

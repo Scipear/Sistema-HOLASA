@@ -82,21 +82,19 @@ def test_crear_asignatura(db_session):
 
 def test_crear_profesor(db_session):
     if db_session.query(ProfesorModel).filter(
-        ProfesorModel.correo == "carlos@test.com"
+        ProfesorModel.nombre == "Carlos"
     ).first():
-        pytest.skip("Profesor 'carlos@test.com' ya existe")
+        pytest.skip("Profesor 'Carlos' ya existe")
     repo = ProfesorRepository()
     obj = repo.create(
         db_session,
         nombre="Carlos",
         apellido="Mendoza",
-        telefono="555-0100",
-        correo="carlos@test.com",
         estado=True,
     )
     db_session.commit()
     assert obj.id is not None
-    assert obj.correo == "carlos@test.com"
+    assert obj.nombre == "Carlos"
 
 
 def test_crear_sesion(db_session):

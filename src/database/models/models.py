@@ -32,8 +32,6 @@ class ProfesorModel(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     nombre = Column(String(255), nullable=False)
     apellido = Column(String(255), nullable=False)
-    telefono = Column(String(50), nullable=True)
-    correo = Column(String(255), unique=True, nullable=True)
     estado = Column(Boolean, default=True)
 
 # 5. Modelo de Sesiones
@@ -47,10 +45,11 @@ class SesionModel(Base):
 
 # 6. Modelo de Salón
 class SalonModel(Base):
-    __tablename__ = "salon"
+    __tablename__ = "salones"
     
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     nombre = Column(String(100), nullable=False)
+    tipo = Column(String(50), nullable=False)
 
 # 7. Relación Sesiones - Profesores (sesiones_profesores)
 class SesionProfesorModel(Base):
@@ -76,3 +75,17 @@ class ProfesorAsignaturaModel(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     profesor_id = Column(Integer, ForeignKey("profesores.id", ondelete="CASCADE"), nullable=False)
     curso_asignatura_id = Column(Integer, ForeignKey("curso_asignatura.id", ondelete="CASCADE"), nullable=False)
+
+class SalonCursoModel(Base):
+    __tablename__ = "salon_curso"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    salon_id = Column(Integer, ForeignKey("salones.id", ondelete="CASCADE"), nullable=False)
+    curso_id = Column(Integer, ForeignKey("cursos.id", ondelete="CASCADE"), nullable=False)
+
+class SalonProfesorModel(Base):
+    __tablename__ = "salon_profesor"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    salon_id = Column(Integer, ForeignKey("salones.id", ondelete="CASCADE"), nullable=False)
+    profesor_id = Column(Integer, ForeignKey("profesores.id", ondelete="CASCADE"), nullable=False)

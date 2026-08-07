@@ -9,6 +9,8 @@ from src.database.models.models import (
     SesionProfesorModel,
     CursoAsignaturaModel,
     ProfesorAsignaturaModel,
+    SalonCursoModel,
+    SalonProfesorModel
 )
 
 __all__ = [
@@ -21,4 +23,6 @@ __all__ = [
     "SesionProfesorModel",
     "CursoAsignaturaModel",
     "ProfesorAsignaturaModel",
+    "SalonCursoModel",
+    "SalonProfesorModel"
 ]

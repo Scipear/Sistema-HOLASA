@@ -118,7 +118,7 @@ def _profesor_con_sesion(db: Session):
 
 def _profesor_carlos(db: Session):
     return db.query(ProfesorModel).filter(
-        ProfesorModel.correo == "carlos@test.com"
+        ProfesorModel.nombre == "Carlos"
     ).first()
 
 
@@ -134,11 +134,11 @@ def test_get_profesores_activos(db_session):
     assert len(resultado) > 0
 
 
-def test_get_profesor_por_correo(db_session):
-    repo = ProfesorRepository()
-    obj = repo.get_by_correo(db_session, "carlos@test.com")
-    assert obj is not None
-    assert obj.correo == "carlos@test.com"
+# def test_get_profesor_por_correo(db_session):
+#     repo = ProfesorRepository()
+#     obj = repo.get_by_correo(db_session, "carlos@test.com")
+#     assert obj is not None
+#     assert obj.correo == "carlos@test.com"
 
 
 # =============================================================================

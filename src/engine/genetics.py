@@ -98,9 +98,9 @@ def create_events():
 
             while left_hours > 0:
                 if 2 < left_hours < 8:
-                    duration = 2 if left_hours == 4 else random.randint(2, left_hours)
+                    duration = 2 if left_hours % 2 == 0 else random.randint(2, left_hours)
 
-                elif left_hours >2 and subject.subject_type != "(Taller) Formacion Cientifica, Tecnologica y Productiva":
+                elif left_hours > 2 and subject.subject_type != "(Taller) Formacion Cientifica, Tecnologica y Productiva":
                     if subject.subject_type == "General":
                         duration = random.choice([2, 4])
                     else:

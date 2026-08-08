@@ -9,17 +9,13 @@ class ProfesorService:
     def __init__(self, repository: ProfesorRepository | None = None):
         self.repository = repository or ProfesorRepository()
 
-    def crear(self, db: Session, nombre: str, apellido: str,
-              telefono: str | None = None, correo: str | None = None,
-              estado: bool = True):
+    def crear(self, db: Session, nombre: str, apellido: str, estado: bool = True):
         """Crea un nuevo profesor.
 
         Args:
             db: Sesión activa de base de datos.
             nombre: Nombre del profesor.
             apellido: Apellido del profesor.
-            telefono: Teléfono (opcional).
-            correo: Correo electrónico (opcional, único).
             estado: Estado activo/inactivo.
 
         Returns:
@@ -32,17 +28,8 @@ class ProfesorService:
             raise ValueError("El nombre del profesor no puede estar vacío")
         if not apellido or not apellido.strip():
             raise ValueError("El apellido del profesor no puede estar vacío")
-        if correo:
-            existente = self.repository.get_by_correo(db, correo.strip())
-            if existente:
-                raise ValueError(f"Ya existe un profesor con el correo {correo}")
         try:
-            obj = self.repository.create(
-                db, nombre=nombre.strip(), apellido=apellido.strip(),
-                telefono=telefono.strip() if telefono else None,
-                correo=correo.strip() if correo else None,
-                estado=estado,
-            )
+            obj = self.repository.create(db, nombre=nombre.strip(), apellido=apellido.strip(), estado=estado)
             db.commit()
             return obj
         except ValueError:
@@ -111,8 +98,6 @@ class ProfesorService:
     def actualizar(self, db: Session, id: int,
                    nombre: str | None = None,
                    apellido: str | None = None,
-                   telefono: str | None = None,
-                   correo: str | None = None,
                    estado: bool | None = None):
         """Actualiza un profesor existente.
 
@@ -121,8 +106,6 @@ class ProfesorService:
             id: Identificador del profesor.
             nombre: Nuevo nombre (opcional).
             apellido: Nuevo apellido (opcional).
-            telefono: Nuevo teléfono (opcional).
-            correo: Nuevo correo (opcional).
             estado: Nuevo estado (opcional).
 
         Returns:
@@ -136,19 +119,11 @@ class ProfesorService:
             raise ValueError("El nombre del profesor no puede estar vacío")
         if apellido is not None and not apellido.strip():
             raise ValueError("El apellido del profesor no puede estar vacío")
-        if correo is not None:
-            existente = self.repository.get_by_correo(db, correo.strip())
-            if existente and existente.id != id:
-                raise ValueError(f"Ya existe un profesor con el correo {correo}")
         kwargs = {}
         if nombre is not None:
             kwargs["nombre"] = nombre.strip()
         if apellido is not None:
             kwargs["apellido"] = apellido.strip()
-        if telefono is not None:
-            kwargs["telefono"] = telefono.strip() if telefono else None
-        if correo is not None:
-            kwargs["correo"] = correo.strip() if correo else None
         if estado is not None:
             kwargs["estado"] = estado
         try:

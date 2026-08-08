@@ -13,9 +13,10 @@ from src.database.models.models import (
     SalonModel,
     SesionProfesorModel,
     CursoAsignaturaModel,
-    ProfesorAsignaturaModel
+    ProfesorAsignaturaModel,
+    SalonCursoModel,
+    SalonProfesorModel
 )
-
 
 def init_database():
     print("Inicializando base de datos local SQLite desde modelos...")

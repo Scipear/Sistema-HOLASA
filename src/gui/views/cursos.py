@@ -1,58 +1,32 @@
 import flet as ft
 from src.database.connection import SessionLocal
 from src.services.curso_service import CursoService
+from src.services.curso_asignatura_service import CursoAsignaturaService
+from src.services.mencion_service import MencionService
+from src.services.asignatura_service import AsignaturaService
 
-db_menciones_disp = [
-    {"nombre": "Electrónica", "codigo": "EO"},
-    {"nombre": "Electricidad", "codigo": "EL"},
-    {"nombre": "Máquinas y Herramientas", "codigo": "MM"},
-    {"nombre": "Refrigeración", "codigo": "MT"},
-    {"nombre": "Metalmecánica", "codigo": "ME"},
-]
-
-db_asignaturas_disp = [
-    {"nombre": "Matemáticas", "tipo": "Teórica"},
-    {"nombre": "Física", "tipo": "Teórica"},
-    {"nombre": "Lenguaje y Literatura", "tipo": "Teórica"},
-    {"nombre": "Circuitos Eléctricos", "tipo": "Técnica"},
-    {"nombre": "Sistemas Digitales", "tipo": "Técnica"},
-    {"nombre": "Laboratorio de Electrónica", "tipo": "Práctica"},
-    {"nombre": "Taller de Maquinaria", "tipo": "Técnica"},
-    {"nombre": "Educación Física", "tipo": "Práctica"},
-]
-
-OPCIONES_YEARS = ["4to", "5to"]
+OPCIONES_YEARS = ["1ro", "2do", "3ro", "4to", "5to", "6to"]
 OPCIONES_SECCIONES = ["A", "B", "C", "D"]
-TIPOS_ASIGNATURA = ["Teórica", "Práctica", "Técnica"]
 
-COLOR_TIPO = {
-    "Teórica":  ("#1A3A5C", "#5B9BD5"),
-    "Práctica": ("#1A2A20", "#439A5D"),
-    "Técnica":  ("#332415", "#E69138"),
-}
+def normalizar_year(val) -> str:
+    """Extrae el dígito principal del año para garantizar coincidencia en filtros."""
+    if not val:
+        return ""
+    s = str(val).lower().strip()
+    for digito in ["1", "2", "3", "4", "5", "6"]:
+        if digito in s:
+            return digito
+    return s
 
 
 def vista_cursos():
+    # =========================================================================
+    # PASO 1: Servicios e Inicialización de UI
+    # =========================================================================
     curso_service = CursoService()
-    
-    # Lista interna reflejando los registros de la base de datos a través del servicio
-    db_cursos = []
-    db = SessionLocal()
-    try:
-        registros_bd = curso_service.obtener_todos(db)
-        for r in registros_bd:
-            db_cursos.append({
-                "id": r.id,
-                "year": r.year,
-                "seccion": r.seccion,
-                "mencion": getattr(r, "mencion", "General"),
-                "codigo_mencion": getattr(r, "codigo_mencion", ""),
-                "asignaturas": getattr(r, "asignaturas", [])
-            })
-    except Exception as e:
-        print(f"Error cargando desde BD: {e}")
-    finally:
-        db.close()
+    curso_asig_service = CursoAsignaturaService()
+    mencion_service = MencionService()
+    asig_service = AsignaturaService()
 
     estilo_tarjeta_oscura = {
         "bgcolor": "#1E202D",
@@ -62,129 +36,159 @@ def vista_cursos():
         "height": 45
     }
 
-    grilla_cursos = ft.Row(wrap=True, spacing=20, run_spacing=20)
+    # Grilla centrada para que las tarjetas se alineen al medio
+    grilla_cursos = ft.Row(
+        wrap=True, 
+        spacing=20, 
+        run_spacing=20, 
+        alignment=ft.MainAxisAlignment.CENTER
+    )
+    
     txt_total = ft.Text("0", size=16, weight=ft.FontWeight.BOLD, color=ft.colors.WHITE)
     txt_total_asig = ft.Text("0", size=16, weight=ft.FontWeight.BOLD, color=ft.colors.WHITE)
 
+    estilo_input = {
+        "border_color": "#303346",
+        "focused_border_color": "#439A5D",
+        "border_radius": 10,
+        "bgcolor": "#13141C",
+        "color": ft.colors.WHITE,
+        "height": 52,
+        "content_padding": 15
+    }
+
     id_actual = ft.Text(visible=False)
+    
     dd_year = ft.Dropdown(
         label="Año",
         options=[ft.dropdown.Option(y) for y in OPCIONES_YEARS],
-        value="4to",
-        border_color="#303346", focused_border_color="#439A5D", border_radius=10,
-        bgcolor="#13141C", color=ft.colors.WHITE, expand=True
+        value="1ro",
+        **estilo_input, expand=True
     )
+    
     dd_seccion = ft.Dropdown(
         label="Sección",
         options=[ft.dropdown.Option(s) for s in OPCIONES_SECCIONES],
         value="A",
-        border_color="#303346", focused_border_color="#439A5D", border_radius=10,
-        bgcolor="#13141C", color=ft.colors.WHITE, width=130
+        **estilo_input, expand=True
     )
+
+    def on_mencion_change(e):
+        txt_nueva_mencion.visible = dd_mencion.value == "__nueva__"
+        if not txt_nueva_mencion.visible:
+            txt_nueva_mencion.value = ""
+        txt_nueva_mencion.update()
 
     dd_mencion = ft.Dropdown(
-        label="Mención",
-        border_color="#303346", focused_border_color="#439A5D", border_radius=10,
-        bgcolor="#13141C", color=ft.colors.WHITE, expand=True
+        label="Mención Técnica",
+        on_change=on_mencion_change,
+        **estilo_input
     )
+
     txt_nueva_mencion = ft.TextField(
         label="Nombre de nueva mención",
-        border_radius=10, border_color="#303346", focused_border_color="#439A5D",
-        color=ft.colors.WHITE, label_style=ft.TextStyle(color="#A0A0B0"), expand=True
+        hint_text="Ej. Informática, Contabilidad...",
+        visible=False,
+        **estilo_input
     )
-    txt_codigo_mencion = ft.TextField(
-        label="Código", max_length=3, width=120,
-        border_radius=10, border_color="#303346", focused_border_color="#439A5D",
-        color=ft.colors.WHITE, label_style=ft.TextStyle(color="#A0A0B0")
-    )
-    panel_nueva_mencion = ft.Column(visible=False, controls=[
-        ft.Text("Nueva mención:", color="#A0A0B0", size=12),
-        ft.Row([txt_nueva_mencion, txt_codigo_mencion], spacing=10)
-    ], spacing=8)
 
-    asignaturas_temp = []
-    lista_chips_asig = ft.Column(spacing=8)
+    def on_asignatura_change(e):
+        container_nueva_asig.visible = dd_asignatura.value == "__nueva__"
+        if not container_nueva_asig.visible:
+            txt_nombre_nueva_asig.value = ""
+        container_nueva_asig.update()
 
     dd_asignatura = ft.Dropdown(
         label="Asignatura",
-        border_color="#303346", focused_border_color="#439A5D", border_radius=10,
-        bgcolor="#13141C", color=ft.colors.WHITE, expand=True
+        on_change=on_asignatura_change,
+        **estilo_input
     )
+
+    # Campos adicionales para crear una asignatura al vuelo
+    txt_nombre_nueva_asig = ft.TextField(
+        label="Nombre de la nueva asignatura",
+        hint_text="Ej. Física, Química...",
+        **estilo_input
+    )
+
+    dd_tipo_nueva_asig = ft.Dropdown(
+        label="Tipo de asignatura",
+        **estilo_input
+    )
+
+    container_nueva_asig = ft.Column([
+        txt_nombre_nueva_asig,
+        dd_tipo_nueva_asig
+    ], spacing=15, visible=False)
+    
     dd_horas_asig = ft.Dropdown(
-        label="Horas semanales",
+        label="Horas",
         options=[ft.dropdown.Option(str(h)) for h in range(1, 9)],
-        value="3", width=160,
+        value="3",
+        border_color="#303346",
+        focused_border_color="#439A5D",
+        border_radius=10,
+        bgcolor="#13141C",
+        color=ft.colors.WHITE,
+        height=52,
+        content_padding=15,
+        width=130
+    )
+    
+    lista_chips_asig = ft.Column(spacing=8, scroll=ft.ScrollMode.AUTO)
+
+    dd_filtro_year = ft.Dropdown(
+        label="Filtrar Año",
+        options=[ft.dropdown.Option("TODOS", "Todos los Años")] + [ft.dropdown.Option(y) for y in OPCIONES_YEARS],
+        value="TODOS", width=160,
         border_color="#303346", focused_border_color="#439A5D", border_radius=10,
-        bgcolor="#13141C", color=ft.colors.WHITE
+        bgcolor="#13141C", color=ft.colors.WHITE, text_style=ft.TextStyle(size=13)
+    )
+    
+    dd_filtro_mencion = ft.Dropdown(
+        label="Filtrar Mención",
+        options=[ft.dropdown.Option("TODAS", "Todas las Menciones")],
+        value="TODAS", width=200,
+        border_color="#303346", focused_border_color="#439A5D", border_radius=10,
+        bgcolor="#13141C", color=ft.colors.WHITE, text_style=ft.TextStyle(size=13)
     )
 
-    def cerrar_modal_advertencia(e):
-        modal_advertencia.open = False
-        e.page.update()
+    # Estado Local en Memoria
+    asignaturas_temp = []
+    map_menciones = {}
+    map_menciones_orden = {}
+    map_asignaturas = {}
+    map_cursos = {}
 
-    def cerrar_modal_exito(e):
-        modal_exito.open = False
-        e.page.update()
-
-    modal_advertencia = ft.AlertDialog(
-        content=ft.Column([
-            ft.Icon(ft.icons.WARNING_ROUNDED, color="#E69138", size=50),
-            ft.Text("Curso Duplicado", weight=ft.FontWeight.BOLD, color=ft.colors.WHITE, size=16, text_align=ft.TextAlign.CENTER),
-            ft.Text("Estás intentando agregar o modificar un curso que ya existe, por favor verifícalo.", color="#A0A0B0", size=13, text_align=ft.TextAlign.CENTER)
-        ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=12, tight=True, width=300),
-        bgcolor="#1E202D",
-        shape=ft.RoundedRectangleBorder(radius=15),
-        actions=[
-            ft.ElevatedButton("OK", on_click=cerrar_modal_advertencia, bgcolor="#E69138", color=ft.colors.WHITE, style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=10)))
-        ],
-        actions_alignment=ft.MainAxisAlignment.CENTER,
-        actions_padding=20
-    )
-
-    modal_exito = ft.AlertDialog(
-        content=ft.Column([
-            ft.Icon(ft.icons.CHECK_CIRCLE_OUTLINE_ROUNDED, color="#439A5D", size=50),
-            ft.Text("Éxito", weight=ft.FontWeight.BOLD, color=ft.colors.WHITE, size=16, text_align=ft.TextAlign.CENTER),
-            ft.Text("Curso procesado de manera exitosa.", color="#A0A0B0", size=13, text_align=ft.TextAlign.CENTER)
-        ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10, tight=True, width=300),
-        bgcolor="#1E202D",
-        shape=ft.RoundedRectangleBorder(radius=15),
-        actions=[
-            ft.ElevatedButton("OK", on_click=cerrar_modal_exito, bgcolor="#439A5D", color=ft.colors.WHITE, style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=10)))
-        ],
-        actions_alignment=ft.MainAxisAlignment.CENTER,
-        actions_padding=20
-    )
-
-    def actualizar_dd_menciones():
-        opciones = [ft.dropdown.Option(m["nombre"]) for m in db_menciones_disp]
-        opciones.append(ft.dropdown.Option(key="__nueva__", text="[+] Nueva Mención"))
-        dd_mencion.options = opciones
-
-    def actualizar_dd_asignaturas():
-        dd_asignatura.options = [ft.dropdown.Option(a["nombre"]) for a in db_asignaturas_disp]
-
-    def on_mencion_change(e):
-        panel_nueva_mencion.visible = (dd_mencion.value == "__nueva__")
-        e.page.update()
-
-    dd_mencion.on_change = on_mencion_change
+    # =========================================================================
+    # PASO 2: Métodos de soporte e interacción
+    # =========================================================================
+    def mostrar_notificacion(page: ft.Page, mensaje: str, es_error: bool = False):
+        snack = ft.SnackBar(
+            content=ft.Text(mensaje, color=ft.colors.WHITE),
+            bgcolor=ft.colors.RED_700 if es_error else ft.colors.GREEN_700,
+            duration=3000
+        )
+        page.snack_bar = snack
+        snack.open = True
+        page.update()
 
     def refrescar_chips_asig():
         lista_chips_asig.controls.clear()
         for asig in asignaturas_temp:
-            bg, col = COLOR_TIPO.get(asig["tipo"], ("#2A2D3E", "#A0A0B0"))
             lista_chips_asig.controls.append(
                 ft.Container(
-                    bgcolor=bg, border=ft.border.all(1, col), border_radius=10,
+                    bgcolor="#2A2D3E", border=ft.border.all(1, "#5A5D70"), border_radius=10,
                     padding=ft.padding.symmetric(horizontal=12, vertical=8),
                     content=ft.Row([
                         ft.Column([
-                            ft.Text(asig["nombre"], color=col, size=13, weight=ft.FontWeight.BOLD),
-                            ft.Text(f"{asig['tipo']} · {asig['horas']}h/sem", color="#A0A0B0", size=11)
+                            ft.Text(asig["nombre"], color=ft.colors.WHITE, size=13, weight=ft.FontWeight.BOLD),
+                            ft.Text(f"{asig.get('tipo', 'Teórica')} · {asig['horas']}h/sem", color="#A0A0B0", size=11)
                         ], spacing=1, expand=True),
-                        ft.IconButton(ft.icons.CLOSE, icon_color=col, icon_size=14,
-                                      on_click=lambda e, a=asig: quitar_asig(e, a), width=20, height=20)
+                        ft.IconButton(
+                            ft.icons.CLOSE, icon_color="#A0A0B0", icon_size=14,
+                            on_click=lambda e, a=asig: quitar_asig(e, a), width=20, height=20
+                        )
                     ])
                 )
             )
@@ -193,289 +197,235 @@ def vista_cursos():
         if asig in asignaturas_temp:
             asignaturas_temp.remove(asig)
             refrescar_chips_asig()
-            e.page.update()
+            lista_chips_asig.update()
 
     def agregar_asignatura(e):
-        nombre = dd_asignatura.value
-        if not nombre:
-            return
-        encontrado = next((a for a in db_asignaturas_disp if a["nombre"] == nombre), None)
-        if not encontrado:
-            return
-        tipo = encontrado["tipo"]
-        if any(a["nombre"] == nombre for a in asignaturas_temp):
-            return
         horas = int(dd_horas_asig.value or 3)
-        asignaturas_temp.append({"nombre": nombre, "tipo": tipo, "horas": horas})
-        refrescar_chips_asig()
-        dd_asignatura.value = None
-        e.page.update()
-
-    def cerrar_modal(e):
-        modal_curso.open = False
-        e.page.update()
-
-    def confirmar_guardar_curso(e):
-        es_duplicado = False
-        id_form = str(id_actual.value).strip()
-        year_form = str(dd_year.value).strip()
-        seccion_form = str(dd_seccion.value).strip()
-        mencion_form = str(dd_mencion.value).strip()
         
-        if mencion_form == "__nueva__":
-            mencion_form = str(txt_nueva_mencion.value).strip()
-        
-        for c in db_cursos:
-            if str(c["year"]).strip() == year_form and str(c["seccion"]).strip() == seccion_form and str(c["mencion"]).strip() == mencion_form:
-                if id_form == "":
-                    es_duplicado = True
-                    break
-                elif str(c["id"]).strip() != id_form:
-                    es_duplicado = True
-                    break
-        
-        if es_duplicado:
-            e.page.dialog = modal_advertencia
-            modal_advertencia.open = True
-            e.page.update()
-            return
-
-        modal_curso.open = False
-        if id_form != "":
-            abrir_modal_confirmar_accion(
-                "¿Confirmar Edición?",
-                "¿Está seguro de que desea guardar los cambios realizados en este curso?",
-                "#439A5D",
-                ejecutar_guardado,
-                e
-            )
-        else:
-            ejecutar_guardado(e)
-
-    def sincronizar_con_bd():
-        """Guarda todos los cambios realizados en la lista local de vuelta a la base de datos."""
-        db = SessionLocal()
-        try:
-            existentes = curso_service.obtener_todos(db)
-            ids_actuales = [c["id"] for c in db_cursos if isinstance(c["id"], int)]
+        if dd_asignatura.value == "__nueva__":
+            nombre_asig = txt_nombre_nueva_asig.value.strip() if txt_nombre_nueva_asig.value else ""
+            tipo_asig = dd_tipo_nueva_asig.value or ""
             
-            # Eliminar los que ya no están
-            for ex in existentes:
-                if ex.id not in ids_actuales:
-                    curso_service.eliminar(db, ex.id)
-            
-            # Crear o actualizar
-            for c in db_cursos:
-                if isinstance(c["id"], int) and any(ex.id == c["id"] for ex in existentes):
-                    curso_service.actualizar(db, c["id"], seccion=c["seccion"], year=c["year"])
-                else:
-                    nuevo = curso_service.crear(db, seccion=c["seccion"], year=c["year"])
-                    c["id"] = nuevo.id
-        except Exception as ex:
-            print(f"Error sincronizando con BD: {ex}")
-        finally:
-            db.close()
-
-    def ejecutar_guardado(e):
-        mencion_nombre = None
-        if dd_mencion.value == "__nueva__":
-            mencion_nombre = txt_nueva_mencion.value.strip()
-            codigo = txt_codigo_mencion.value.strip().upper()
-            if not mencion_nombre:
+            if not nombre_asig:
+                mostrar_notificacion(e.page, "Debe ingresar el nombre de la nueva asignatura.", es_error=True)
                 return
-            db_menciones_disp.append({"nombre": mencion_nombre, "codigo": codigo})
-            actualizar_dd_menciones()
-        else:
-            mencion_nombre = dd_mencion.value
-        mencion_obj = next((m for m in db_menciones_disp if m["nombre"] == mencion_nombre), {})
-        codigo_mencion = mencion_obj.get("codigo", "")
-        
-        if id_actual.value == "":
-            nuevo_id = max([c["id"] for c in db_cursos if isinstance(c["id"], int)], default=0) + 1
-            db_cursos.append({
-                "id": nuevo_id,
-                "year": dd_year.value,
-                "seccion": dd_seccion.value,
-                "mencion": mencion_nombre,
-                "codigo_mencion": codigo_mencion,
-                "asignaturas": asignaturas_temp.copy()
+            
+            if any(a["nombre"].lower() == nombre_asig.lower() for a in asignaturas_temp):
+                mostrar_notificacion(e.page, "La asignatura ya está agregada al curso.", es_error=True)
+                return
+
+            asignaturas_temp.append({
+                "id": None,
+                "asignatura_id": None,
+                "nombre": nombre_asig,
+                "tipo": tipo_asig,
+                "horas": horas,
+                "es_nueva": True
             })
+            
+            txt_nombre_nueva_asig.value = ""
+            container_nueva_asig.visible = False
+            dd_asignatura.value = None
+            
         else:
-            for c in db_cursos:
-                if str(c["id"]) == str(id_actual.value):
-                    c["year"] = dd_year.value
-                    c["seccion"] = dd_seccion.value
-                    c["mencion"] = mencion_nombre
-                    c["codigo_mencion"] = codigo_mencion
-                    c["asignaturas"] = asignaturas_temp.copy()
+            asig_id_str = dd_asignatura.value
+            if not asig_id_str:
+                mostrar_notificacion(e.page, "Seleccione una asignatura para agregar.", es_error=True)
+                return
+            encontrado = map_asignaturas.get(int(asig_id_str))
+            if not encontrado:
+                return
+            if any(not a.get("es_nueva") and str(a.get("asignatura_id")) == str(encontrado["id"]) for a in asignaturas_temp):
+                mostrar_notificacion(e.page, "La asignatura ya está agregada al curso.", es_error=True)
+                return
+                
+            asignaturas_temp.append({
+                "id": encontrado["id"],
+                "asignatura_id": encontrado["id"],
+                "nombre": encontrado["nombre"],
+                "tipo": encontrado["tipo"],
+                "horas": horas,
+                "es_nueva": False
+            })
+            dd_asignatura.value = None
+
+        refrescar_chips_asig()
         
-        sincronizar_con_bd()
-        cargar_grilla(txt_buscar.value.lower())
-        e.page.dialog = modal_exito
-        modal_exito.open = True
-        e.page.update()
+        # Actualizamos individualmente en vez de recargar la vista entera
+        dd_asignatura.update()
+        container_nueva_asig.update()
+        lista_chips_asig.update()
 
-    modal_curso = ft.AlertDialog(
-        title=ft.Text("Formulario de Curso", weight=ft.FontWeight.BOLD, color=ft.colors.WHITE),
-        bgcolor="#1E202D",
-        shape=ft.RoundedRectangleBorder(radius=15),
-        content=ft.Container(
-            width=580,
-            content=ft.Column([
-                id_actual,
-                ft.Row([dd_year, dd_seccion], spacing=15),
-                ft.Text("-------------------------------------------------------------------------", color="#303346", size=12),
-                ft.Text("Mención Técnica", color="#A0A0B0", weight=ft.FontWeight.BOLD),
-                ft.Row([
-                    dd_mencion,
-                    ft.IconButton(
-                        ft.icons.ADD_CIRCLE_OUTLINE, icon_color="#439A5D", tooltip="Crear nueva mención",
-                        on_click=lambda e: (setattr(dd_mencion, 'value', '__nueva__'), setattr(panel_nueva_mencion, 'visible', True), e.page.update())
-                    )
-                ]),
-                panel_nueva_mencion,
-                ft.Text("-------------------------------------------------------------------------", color="#303346", size=12),
-                ft.Text("Asignaturas del Curso", color="#A0A0B0", weight=ft.FontWeight.BOLD),
-                ft.Row([
-                    dd_asignatura,
-                    dd_horas_asig,
-                    ft.ElevatedButton("Agregar", icon=ft.icons.ADD, bgcolor="#439A5D", color=ft.colors.WHITE,
-                                      on_click=agregar_asignatura,
-                                      style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=10)))
-                ], spacing=10),
-                lista_chips_asig,
-            ], spacing=12, scroll=ft.ScrollMode.AUTO)
-        ),
-        actions=[
-            ft.TextButton("Cancelar", on_click=cerrar_modal, style=ft.ButtonStyle(color="#A0A0B0")),
-            ft.ElevatedButton(
-                "Guardar Registro", on_click=confirmar_guardar_curso,
-                bgcolor="#439A5D", color=ft.colors.WHITE,
-                style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=10))
-            )
-        ],
-        actions_padding=20
-    )
-
-    modal_confirmacion = ft.AlertDialog(
-        bgcolor="#1E202D",
-        shape=ft.RoundedRectangleBorder(radius=15),
-        actions_padding=20,
-        actions_alignment=ft.MainAxisAlignment.END
-    )
-
-    def abrir_modal_confirmar_accion(titulo, mensaje, color_btn, accion_si, e):
-        modal_confirmacion.title = ft.Text(titulo, weight=ft.FontWeight.BOLD, color=ft.colors.WHITE)
-        modal_confirmacion.content = ft.Text(mensaje, color="#A0A0B0")
-        def click_si(ex):
-            modal_confirmacion.open = False
-            ex.page.update()
-            accion_si(ex)
-
-        modal_confirmacion.actions = [
-            ft.TextButton("No, Cancelar", on_click=lambda ex: cerrar_modal_confirmacion(ex), style=ft.ButtonStyle(color="#A0A0B0")),
-            ft.ElevatedButton("Sí, Confirmar", on_click=click_si, bgcolor=color_btn, color=ft.colors.WHITE, style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=10)))
-        ]
-        e.page.dialog = modal_confirmacion
-        modal_confirmacion.open = True
+    def cerrar_modal_formulario(e):
+        modal_formulario.open = False
         e.page.update()
 
     def cerrar_modal_confirmacion(e):
         modal_confirmacion.open = False
         e.page.update()
 
-    def pedir_confirmacion_eliminar(cur, e):
-        abrir_modal_confirmar_accion(
-            "¿Confirmar Eliminación?",
-            f"¿Está completamente seguro de que desea eliminar este curso del sistema?",
-            "#E57373",
-            lambda ex: ejecutar_eliminacion(cur["id"], ex),
-            e
-        )
+    def pre_guardar_curso(e):
+        if not dd_year.value or not dd_seccion.value:
+            mostrar_notificacion(e.page, "El año y la sección son obligatorios.", es_error=True)
+            return
+
+        if not dd_mencion.value:
+            mostrar_notificacion(e.page, "Debe seleccionar una mención.", es_error=True)
+            return
+
+        if dd_mencion.value == "__nueva__":
+            if not txt_nueva_mencion.value or not txt_nueva_mencion.value.strip():
+                mostrar_notificacion(e.page, "Debe ingresar el nombre de la nueva mención.", es_error=True)
+                return
+
+        id_form = str(id_actual.value).strip()
+        year_form = str(dd_year.value).strip()
+        seccion_form = str(dd_seccion.value).strip()
+        
+        # Validación de duplicados en caché (Evita consultas innecesarias)
+        if dd_mencion.value != "__nueva__":
+            mencion_val = str(dd_mencion.value).strip()
+            for c_id, c in map_cursos.items():
+                if normalizar_year(c["year"]) == normalizar_year(year_form) and str(c["seccion"]).strip() == seccion_form:
+                    if str(c.get("mencion_id")) == mencion_val:
+                        if id_form == "" or str(c_id) != id_form:
+                            mostrar_notificacion(e.page, "Este curso ya se encuentra registrado.", es_error=True)
+                            return
+
+        if id_form != "":
+            modal_formulario.open = False
+            modal_confirmacion.title = ft.Text("¿Confirmar Edición?", weight=ft.FontWeight.BOLD, color=ft.colors.WHITE)
+            modal_confirmacion.content = ft.Text("¿Desea guardar los cambios en este curso?", color="#A0A0B0")
+            modal_confirmacion.actions = [
+                ft.TextButton("Cancelar", on_click=cerrar_modal_confirmacion, style=ft.ButtonStyle(color="#A0A0B0")),
+                ft.ElevatedButton("Sí, Confirmar", on_click=ejecutar_guardado, bgcolor="#439A5D", color=ft.colors.WHITE)
+            ]
+            e.page.dialog = modal_confirmacion
+            modal_confirmacion.open = True
+            e.page.update()
+        else:
+            ejecutar_guardado(e)
+
+    def ejecutar_guardado(e):
+        modal_confirmacion.open = False
+        modal_formulario.open = False
+        e.page.update()
+
+        with SessionLocal() as db:
+            try:
+                mencion_id = None
+                if dd_mencion.value == "__nueva__":
+                    nombre_nueva = txt_nueva_mencion.value.strip()
+                    nueva_menc = mencion_service.crear(db, nombre=nombre_nueva)
+                    mencion_id = nueva_menc.id
+                elif dd_mencion.value:
+                    mencion_id = int(dd_mencion.value)
+
+                asignaturas_procesadas = []
+                for asig in asignaturas_temp:
+                    asig_id = asig.get("asignatura_id")
+                    if asig.get("es_nueva"):
+                        nueva_asig_db = asig_service.crear(db, nombre=asig["nombre"], tipo=asig["tipo"])
+                        asig_id = nueva_asig_db.id
+                    
+                    asignaturas_procesadas.append({
+                        "asignatura_id": asig_id,
+                        "horas": asig["horas"]
+                    })
+
+                if id_actual.value == "":
+                    nuevo_curso = curso_service.crear(db, seccion=dd_seccion.value, year=dd_year.value, mencion_id=mencion_id)
+                    for asig in asignaturas_procesadas:
+                        curso_asig_service.crear(db, curso_id=nuevo_curso.id, asignatura_id=asig["asignatura_id"], horas_semanales=asig["horas"])
+                    mostrar_notificacion(e.page, "Curso registrado exitosamente.")
+                else:
+                    curso_id = int(id_actual.value)
+                    curso_service.actualizar(db, curso_id, seccion=dd_seccion.value, year=dd_year.value, mencion_id=mencion_id)
+                    
+                    rels_actuales = curso_asig_service.obtener_por_curso(db, curso_id)
+                    ids_actuales_asig = {r.asignatura_id: r for r in rels_actuales}
+                    ids_nuevos_asig = {asig["asignatura_id"]: asig for asig in asignaturas_procesadas}
+
+                    for asig_id, rel in ids_actuales_asig.items():
+                        if asig_id not in ids_nuevos_asig:
+                            curso_asig_service.eliminar(db, rel.id)
+
+                    for asig_id, asig in ids_nuevos_asig.items():
+                        if asig_id in ids_actuales_asig:
+                            curso_asig_service.actualizar(db, ids_actuales_asig[asig_id].id, horas_semanales=asig["horas"])
+                        else:
+                            curso_asig_service.crear(db, curso_id=curso_id, asignatura_id=asig_id, horas_semanales=asig["horas"])
+                    mostrar_notificacion(e.page, "Curso actualizado exitosamente.")
+
+                cargar_datos(e.page)
+                
+            except ValueError as ve:
+                mostrar_notificacion(e.page, str(ve), es_error=True)
+            except Exception as ex:
+                mostrar_notificacion(e.page, f"Error inesperado: {str(ex)}", es_error=True)
+
+    def pedir_confirmacion_eliminar(cur_id, e):
+        modal_confirmacion.title = ft.Text("¿Confirmar Eliminación?", weight=ft.FontWeight.BOLD, color=ft.colors.WHITE)
+        modal_confirmacion.content = ft.Text("¿Desea eliminar de forma permanente este curso?", color="#A0A0B0")
+        modal_confirmacion.actions = [
+            ft.TextButton("Cancelar", on_click=cerrar_modal_confirmacion, style=ft.ButtonStyle(color="#A0A0B0")),
+            ft.ElevatedButton("Sí, Eliminar", on_click=lambda ex: ejecutar_eliminacion(cur_id, ex), bgcolor="#E57373", color=ft.colors.WHITE)
+        ]
+        e.page.dialog = modal_confirmacion
+        modal_confirmacion.open = True
+        e.page.update()
 
     def ejecutar_eliminacion(cur_id, e):
-        nonlocal db_cursos
-        db_cursos = [c for c in db_cursos if c["id"] != cur_id]
-        sincronizar_con_bd()
-        cargar_grilla(txt_buscar.value.lower())
+        modal_confirmacion.open = False
         e.page.update()
+        with SessionLocal() as db:
+            try:
+                curso_service.eliminar(db, cur_id)
+                mostrar_notificacion(e.page, "Curso eliminado exitosamente.")
+                cargar_datos(e.page)
+            except ValueError as ve:
+                mostrar_notificacion(e.page, str(ve), es_error=True)
+            except Exception as ex:
+                mostrar_notificacion(e.page, f"Error inesperado: {str(ex)}", es_error=True)
 
-    def abrir_modal_crear(e):
-        id_actual.value = ""
-        dd_year.value = "4to"
-        dd_seccion.value = "A"
-        dd_mencion.value = None
-        dd_asignatura.value = None
-        dd_horas_asig.value = "3"
-        txt_nueva_mencion.value = ""
-        txt_codigo_mencion.value = ""
-        panel_nueva_mencion.visible = False
-        asignaturas_temp.clear()
-        actualizar_dd_menciones()
-        actualizar_dd_asignaturas()
-        refrescar_chips_asig()
-        e.page.dialog = modal_curso
-        modal_curso.open = True
-        e.page.update()
-
-    def abrir_modal_editar(cur, e):
-        id_actual.value = str(cur["id"])
-        dd_year.value = cur["year"]
-        dd_seccion.value = cur["seccion"]
-        actualizar_dd_menciones()
-        actualizar_dd_asignaturas()
-        dd_mencion.value = cur["mencion"]
-        dd_asignatura.value = None
-        dd_horas_asig.value = "3"
-        txt_nueva_mencion.value = ""
-        txt_codigo_mencion.value = ""
-        panel_nueva_mencion.visible = (cur["mencion"] == "__nueva__")
-        asignaturas_temp.clear()
-        asignaturas_temp.extend([a.copy() for a in cur.get("asignaturas", [])])
-        refrescar_chips_asig()
-        e.page.dialog = modal_curso
-        modal_curso.open = True
-        e.page.update()
-
-    def filtrar_cursos(e):
-        term = txt_buscar.value.lower()
-        cargar_grilla(term)
-        e.page.update()
-
-    txt_buscar = ft.TextField(
-        hint_text="Busqueda",
-        width=320,
-        height=40,
-        content_padding=ft.padding.only(left=15, right=10),
-        border_radius=10,
-        border_color="#303346",
-        focused_border_color="#439A5D",
-        prefix=ft.Icon(ft.icons.SEARCH, color="#A0A0B0", size=20),
-        hint_style=ft.TextStyle(color="#5A5D70", size=13),
-        text_style=ft.TextStyle(color=ft.colors.WHITE, size=13),
-        on_change=filtrar_cursos
-    )
-
-    def cargar_grilla(filtro=""):
+    def filtrar_grilla(e=None):
         grilla_cursos.controls.clear()
         total_asig = 0
         cursos_visibles = 0
-        for cur in db_cursos:
-            year_str = str(cur["year"]).lower()
-            seccion_str = str(cur["seccion"]).lower()
-            
-            if filtro and (filtro not in year_str and filtro not in seccion_str):
-                continue
-                
+
+        year_filtro = dd_filtro_year.value
+        mencion_filtro = dd_filtro_mencion.value
+
+        cursos_ordenados = sorted(
+            map_cursos.values(),
+            key=lambda x: (
+                map_menciones_orden.get(x["mencion_id"], 999),
+                int(normalizar_year(x["year"])) if normalizar_year(x["year"]).isdigit() else 99,
+                str(x["seccion"]).upper()
+            )
+        )
+
+        for cur in cursos_ordenados:
+            cur_mencion_id = str(cur["mencion_id"]) if cur["mencion_id"] else ""
+
+            if year_filtro and year_filtro != "TODOS":
+                if normalizar_year(cur["year"]) != normalizar_year(year_filtro):
+                    continue
+
+            if mencion_filtro and mencion_filtro != "TODAS":
+                if cur_mencion_id != mencion_filtro:
+                    continue
+
             cursos_visibles += 1
             total_asig += len(cur.get("asignaturas", []))
             chips_asig = ft.Row(wrap=True, spacing=5)
             for asig in cur.get("asignaturas", []):
-                bg, col = COLOR_TIPO.get(asig["tipo"], ("#2A2D3E", "#A0A0B0"))
                 chips_asig.controls.append(
                     ft.Container(
-                        content=ft.Text(f"{asig['nombre']} ({asig['horas']}h)", size=10, color=col),
-                        bgcolor=bg, padding=ft.padding.symmetric(horizontal=8, vertical=3),
+                        content=ft.Text(f"{asig['nombre']} ({asig['horas']}h)", size=10, color="#A0A0B0"),
+                        bgcolor="#2A2D3E",
+                        border=ft.border.all(1, "#5A5D70"),
+                        padding=ft.padding.symmetric(horizontal=8, vertical=3),
                         border_radius=8
                     )
                 )
@@ -491,16 +441,12 @@ def vista_cursos():
                         content=ft.Row([
                             ft.Icon(ft.icons.CLASS_, color="#5B9BD5", size=24),
                             ft.Column([
-                                ft.Text(f"{cur['year']} año — Sección {cur['seccion']}",
-                                        color=ft.colors.WHITE, weight=ft.FontWeight.BOLD, size=15),
-                                ft.Text(f"{cur['mencion']} ({cur.get('codigo_mencion', '')})",
-                                        color="#5B9BD5", size=12)
+                                ft.Text(f"{cur['year']} año — Sección {cur['seccion']}", color=ft.colors.WHITE, weight=ft.FontWeight.BOLD, size=15),
+                                ft.Text(f"{cur['mencion']} ({cur.get('codigo_mencion', '')})", color="#5B9BD5", size=12)
                             ], spacing=1, expand=True),
                             ft.Container(
-                                content=ft.Text(str(len(cur.get("asignaturas", []))),
-                                                size=18, weight=ft.FontWeight.BOLD, color="#5B9BD5"),
-                                bgcolor="#13141C", width=36, height=36, border_radius=8,
-                                alignment=ft.alignment.center
+                                content=ft.Text(str(len(cur.get("asignaturas", []))), size=18, weight=ft.FontWeight.BOLD, color="#5B9BD5"),
+                                bgcolor="#13141C", width=36, height=36, border_radius=8, alignment=ft.alignment.center
                             )
                         ], spacing=10)
                     ),
@@ -513,12 +459,12 @@ def vista_cursos():
                             ft.Row([
                                 ft.Container(
                                     content=ft.IconButton(ft.icons.EDIT, icon_color="#A0A0B0", icon_size=16,
-                                                          on_click=lambda e, c=cur: abrir_modal_editar(c, e)),
+                                                          on_click=lambda ex, cid=cur["id"]: abrir_modal_editar(cid, ex)),
                                     bgcolor="#2A2D3E", border_radius=8, width=32, height=32
                                 ),
                                 ft.Container(
                                     content=ft.IconButton(ft.icons.DELETE, icon_color="#E57373", icon_size=16,
-                                                          on_click=lambda e, c=cur: pedir_confirmacion_eliminar(c, e)),
+                                                          on_click=lambda ex, cid=cur["id"]: pedir_confirmacion_eliminar(cid, ex)),
                                     bgcolor="#3E2A2A", border_radius=8, width=32, height=32
                                 ),
                             ], spacing=8)
@@ -530,9 +476,249 @@ def vista_cursos():
 
         txt_total.value = str(cursos_visibles)
         txt_total_asig.value = str(total_asig)
+        
+        # Evitar page.update() si es render inicial
+        if e and e.page:
+            grilla_cursos.update()
+            txt_total.update()
+            txt_total_asig.update()
 
-    cargar_grilla()
+    dd_filtro_year.on_change = filtrar_grilla
+    dd_filtro_mencion.on_change = filtrar_grilla
 
+    # =========================================================================
+    # PASO 3: Modales estructurados
+    # =========================================================================
+    modal_confirmacion = ft.AlertDialog(
+        bgcolor="#1E202D",
+        shape=ft.RoundedRectangleBorder(radius=15),
+        actions_padding=20,
+        actions_alignment=ft.MainAxisAlignment.END
+    )
+
+    modal_formulario = ft.AlertDialog(
+        title=ft.Text("Formulario de Curso", weight=ft.FontWeight.BOLD, color=ft.colors.WHITE),
+        bgcolor="#1E202D",
+        shape=ft.RoundedRectangleBorder(radius=15),
+        content=ft.Container(
+            width=580,
+            height=720,
+            padding=ft.padding.only(top=5, right=5),
+            content=ft.Column([
+                id_actual,
+                ft.Row([
+                    dd_year,
+                    dd_seccion,
+                ], spacing=15),
+                
+                dd_mencion,
+                txt_nueva_mencion,
+                
+                ft.Divider(color="#303346", height=10),
+
+                dd_asignatura,
+                container_nueva_asig,
+
+                ft.Row([
+                    dd_horas_asig,
+                    ft.ElevatedButton(
+                        "Agregar",
+                        icon=ft.icons.ADD,
+                        bgcolor="#439A5D",
+                        color=ft.colors.WHITE,
+                        on_click=agregar_asignatura,
+                        height=52,
+                        style=ft.ButtonStyle(
+                            shape=ft.RoundedRectangleBorder(radius=10),
+                            padding=ft.padding.symmetric(horizontal=20)
+                        )
+                    )
+                ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                
+                ft.Container(
+                    content=lista_chips_asig,
+                    height=200,
+                    bgcolor="#13141C",
+                    border=ft.border.all(1, "#303346"),
+                    border_radius=10,
+                    padding=10,
+                    clip_behavior=ft.ClipBehavior.ANTI_ALIAS
+                ),
+            ], spacing=15, scroll=ft.ScrollMode.AUTO)
+        ),
+        actions=[
+            ft.TextButton("Cancelar", on_click=cerrar_modal_formulario, style=ft.ButtonStyle(color="#A0A0B0")),
+            ft.ElevatedButton(
+                "Guardar Registro", on_click=pre_guardar_curso,
+                bgcolor="#439A5D", color=ft.colors.WHITE,
+                style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=10))
+            )
+        ],
+        actions_padding=20
+    )
+
+    def abrir_modal_crear(e):
+        id_actual.value = ""
+        dd_year.value = "1ro"
+        dd_seccion.value = "A"
+        dd_mencion.value = dd_mencion.options[0].key if dd_mencion.options else None
+        txt_nueva_mencion.value = ""
+        txt_nueva_mencion.visible = False
+        dd_asignatura.value = None
+        txt_nombre_nueva_asig.value = ""
+        if dd_tipo_nueva_asig.options:
+            dd_tipo_nueva_asig.value = dd_tipo_nueva_asig.options[0].key
+        container_nueva_asig.visible = False
+        dd_horas_asig.value = "3"
+        asignaturas_temp.clear()
+        refrescar_chips_asig()
+        
+        e.page.dialog = modal_formulario
+        modal_formulario.open = True
+        e.page.update()
+
+    def abrir_modal_editar(cur_id, e):
+        cur_dict = map_cursos.get(cur_id)
+        if not cur_dict:
+            return
+        id_actual.value = str(cur_dict["id"])
+        
+        yr_norm = normalizar_year(cur_dict["year"])
+        match_yr = next((y for y in OPCIONES_YEARS if normalizar_year(y) == yr_norm), "1ro")
+        dd_year.value = match_yr
+
+        dd_seccion.value = cur_dict["seccion"] if cur_dict["seccion"] in OPCIONES_SECCIONES else "A"
+        dd_mencion.value = str(cur_dict["mencion_id"]) if cur_dict.get("mencion_id") else None
+        
+        txt_nueva_mencion.value = ""
+        txt_nueva_mencion.visible = False
+
+        dd_asignatura.value = None
+        txt_nombre_nueva_asig.value = ""
+        if dd_tipo_nueva_asig.options:
+            dd_tipo_nueva_asig.value = dd_tipo_nueva_asig.options[0].key
+        container_nueva_asig.visible = False
+        dd_horas_asig.value = "3"
+
+        asignaturas_temp.clear()
+        for asig_data in cur_dict.get("asignaturas", []):
+            asignaturas_temp.append({
+                "id": asig_data["asignatura_id"],
+                "asignatura_id": asig_data["asignatura_id"],
+                "nombre": asig_data["nombre"],
+                "tipo": asig_data.get("tipo", ""),
+                "horas": asig_data["horas"],
+                "es_nueva": False
+            })
+        refrescar_chips_asig()
+        
+        e.page.dialog = modal_formulario
+        modal_formulario.open = True
+        e.page.update()
+
+    # =========================================================================
+    # PASO 4: Carga de datos dinámicos desde Base de Datos
+    # =========================================================================
+    def cargar_datos(page: ft.Page | None = None):
+        with SessionLocal() as db:
+            try:
+                menciones_db = mencion_service.obtener_todos(db)
+                map_menciones.clear()
+                map_menciones_orden.clear()
+                
+                for idx, m in enumerate(menciones_db):
+                    map_menciones[m.id] = {
+                        "id": m.id,
+                        "nombre": m.nombre,
+                        "codigo": getattr(m, "codigo", getattr(m, "siglas", ""))
+                    }
+                    map_menciones_orden[m.id] = idx
+
+                asignaturas_db = asig_service.obtener_todos(db)
+                map_asignaturas.clear()
+                
+                # Recolectar únicamente los tipos únicos existentes en la base de datos
+                tipos_unicos = set()
+                for a in asignaturas_db:
+                    tipo_val = getattr(a, "tipo", None)
+                    if tipo_val:
+                        tipos_unicos.add(tipo_val)
+                    map_asignaturas[a.id] = {
+                        "id": a.id,
+                        "nombre": a.nombre,
+                        "tipo": tipo_val or ""
+                    }
+
+                # Llenar opciones del dropdown de tipos de asignatura
+                dd_tipo_nueva_asig.options = [ft.dropdown.Option(t) for t in sorted(tipos_unicos)]
+                if dd_tipo_nueva_asig.options:
+                    dd_tipo_nueva_asig.value = dd_tipo_nueva_asig.options[0].key
+                else:
+                    dd_tipo_nueva_asig.value = None
+
+                opciones_form_mencion = []
+                for m in map_menciones.values():
+                    nombre_val = m["nombre"]
+                    nombre_texto = nombre_val if len(nombre_val) <= 25 else nombre_val[:22] + "..."
+                    opciones_form_mencion.append(ft.dropdown.Option(text=nombre_texto, key=str(m["id"])))
+                opciones_form_mencion.append(ft.dropdown.Option(text="[+] Nueva Mención", key="__nueva__"))
+                dd_mencion.options = opciones_form_mencion
+
+                opciones_filtro_mencion = [ft.dropdown.Option("TODAS", "Todas las Menciones")]
+                for m in map_menciones.values():
+                    nombre_val = m["nombre"]
+                    nombre_texto = nombre_val if len(nombre_val) <= 20 else nombre_val[:17] + "..."
+                    opciones_filtro_mencion.append(ft.dropdown.Option(key=str(m["id"]), text=nombre_texto))
+                dd_filtro_mencion.options = opciones_filtro_mencion
+
+                opciones_form_asig = []
+                for a in map_asignaturas.values():
+                    opciones_form_asig.append(ft.dropdown.Option(text=a["nombre"], key=str(a["id"])))
+                opciones_form_asig.append(ft.dropdown.Option(text="[+] Nueva Asignatura", key="__nueva__"))
+                dd_asignatura.options = opciones_form_asig
+
+                cursos_db = curso_service.obtener_todos(db)
+                map_cursos.clear()
+                for c in cursos_db:
+                    mencion_info = map_menciones.get(c.mencion_id) if c.mencion_id else None
+                    m_nombre = mencion_info["nombre"] if mencion_info else "General"
+                    m_codigo = mencion_info["codigo"] if mencion_info else ""
+
+                    rels = curso_asig_service.obtener_por_curso(db, c.id)
+                    asig_list = []
+                    for r in rels:
+                        asig_obj = map_asignaturas.get(r.asignatura_id)
+                        if asig_obj:
+                            asig_list.append({
+                                "asignatura_id": r.asignatura_id,
+                                "nombre": asig_obj["nombre"],
+                                "tipo": asig_obj["tipo"],
+                                "horas": r.horas_semanales
+                            })
+
+                    map_cursos[c.id] = {
+                        "id": c.id,
+                        "year": c.year,
+                        "seccion": c.seccion,
+                        "mencion": m_nombre,
+                        "codigo_mencion": m_codigo,
+                        "mencion_id": c.mencion_id,
+                        "asignaturas": asig_list
+                    }
+
+                filtrar_grilla()
+                if page:
+                    page.update()
+
+            except Exception as ex:
+                if page:
+                    mostrar_notificacion(page, f"Error al cargar datos: {str(ex)}", es_error=True)
+
+    cargar_datos()
+
+    # =========================================================================
+    # PASO 5: Retorno con Cabecera Fija y Contenido Centrado y Separado
+    # =========================================================================
     tarjeta_stats = ft.Container(
         **estilo_tarjeta_oscura,
         content=ft.Row([
@@ -549,7 +735,9 @@ def vista_cursos():
     )
 
     return ft.Container(
-        padding=20, expand=True,
+        padding=20, 
+        expand=True,
+        alignment=ft.alignment.top_left,
         content=ft.Column(
             controls=[
                 ft.Row(
@@ -559,27 +747,39 @@ def vista_cursos():
                             ft.Text("Administra los cursos, sus menciones y asignaturas", size=14, color="#A0A0B0")
                         ], spacing=2),
                         ft.Row([
-                            txt_buscar,
+                            ft.Row([
+                                dd_filtro_year,
+                                dd_filtro_mencion,
+                            ], spacing=10),
                             ft.ElevatedButton(
                                 "Añadir Curso", icon=ft.icons.ADD, on_click=abrir_modal_crear,
                                 bgcolor="#439A5D", color=ft.colors.WHITE,
                                 style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=10), padding=20)
                             )
-                        ], spacing=10)
+                        ], spacing=30, vertical_alignment=ft.CrossAxisAlignment.CENTER)
                     ],
-                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN
+                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER
                 ),
                 ft.Divider(height=10, color=ft.colors.TRANSPARENT),
                 tarjeta_stats,
-                ft.Divider(height=5, color=ft.colors.TRANSPARENT),
-                ft.Container(
-                    expand=True,
-                    content=ft.Column(
-                        [ft.Container(content=grilla_cursos, expand=True)],
-                        scroll=ft.ScrollMode.AUTO, expand=True
-                    )
+                ft.Divider(height=10, color=ft.colors.TRANSPARENT),
+                ft.Column(
+                    controls=[
+                        ft.Container(
+                            content=grilla_cursos,
+                            padding=ft.padding.only(left=20, right=35, top=5, bottom=20),
+                            alignment=ft.alignment.center
+                        )
+                    ],
+                    alignment=ft.MainAxisAlignment.START,
+                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                    scroll=ft.ScrollMode.AUTO,
+                    expand=True
                 )
             ],
+            alignment=ft.MainAxisAlignment.START,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
             expand=True
         )
     )

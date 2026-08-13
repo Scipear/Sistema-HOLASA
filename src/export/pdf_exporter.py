@@ -220,8 +220,23 @@ def _group_page_story(
     story.append(Paragraph(year_label, _year_style))
     story.append(Spacer(1, 14))
 
-    story.append(Paragraph(_group_title(group_id, maps), _course_style))
-    story.append(Spacer(1, 10))
+    course_band = Table(
+        [[Paragraph(_group_title(group_id, maps), _course_style)]],
+        colWidths=[760],
+        rowHeights=[22],
+    )
+    course_band.setStyle(TableStyle(
+        [
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#1F4E78")),
+            ("GRID", (0, 0), (-1, -1), 0.6, colors.black),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 3),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+            ("TOPPADDING", (0, 0), (-1, -1), 2),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ]
+    ))
+    story.append(course_band)
 
     grid, spans = _build_grid(group_id, events, data, maps)
 
@@ -246,7 +261,7 @@ def _group_page_story(
     table = Table(rows, colWidths=[70, 138, 138, 138, 138, 138], rowHeights=row_heights)
     table.setStyle(TableStyle(
         [
-            ("GRID", (0, 0), (-1, -1), 0.6, colors.HexColor("#8A8A8A")),
+            ("GRID", (0, 0), (-1, -1), 0.6, colors.black),
             ("BACKGROUND", (1, 1), (-1, -1), colors.HexColor("#FFFFFF")),
             ("BACKGROUND", (0, 1), (0, -1), colors.HexColor("#DDEBF7")),
             ("BACKGROUND", (0, 3), (0, 3), colors.HexColor("#E7E6E6")),

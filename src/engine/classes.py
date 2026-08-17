@@ -1,19 +1,20 @@
 from __future__ import annotations
 
 class Teacher():
-    def __init__(self, id: int, name: str, last_name: str, availabilities: list[Academic_Hour]):
+    def __init__(self, id: int, name: str, last_name: str, availabilities: list[Academic_Hour], rooms: list[Room] = None):
         self.id = id
         self.name = name
         self.last_name = last_name
         self.availabilities = availabilities
+        self.rooms = rooms
 
 class Subject():
-    def __init__(self, id: int, name: str, subject_type: str, hours: int, teachers: list[Teacher]):
+    def __init__(self, id: int, name: str, subject_type: str, hours: int, teacher: Teacher):
         self.id = id
         self.name = name
         self.hours = hours
         self.subject_type = subject_type
-        self.teachers = teachers
+        self.teacher = teacher
 
 class Academic_Hour:
     def __init__(self, db_id: int, index: int, day: str, day_index: int, start_hour: str, end_hour: str):
@@ -35,20 +36,34 @@ class Room():
         self.name = name
 
 class Group():
-    def __init__(self, id: int, name: str, subjects: list[Subject]):
+    def __init__(self, id: int, year: int, name: str, subjects: list[Subject], rooms: list[Room] = None):
         self.id = id
+        self.year = year
         self.name = name
         self.subjects = subjects
+        self.rooms = rooms
         
 class Event():
-    def __init__(self, id: int, teacher: Teacher, subject: Subject, group: Group, duration: int):
+    def __init__(self, id: int, teacher: Teacher, subject: Subject, group: Group, duration: int, room: Room = None):
         self.id = id
         self.group = group.id
-        self.teacher = teacher.id
+        self.teacher = teacher.id if teacher is not None else teacher
         self.subject = subject.id
         self.duration = duration
         self.start_hour = None
-        self.room = None
+        self.room = room
+    
+    @property
+    def room(self):
+        return self._room
+
+    @room.setter
+    def room(self, value):
+        # Si le asignan un objeto Room, extrae automáticamente el .id
+        if hasattr(value, 'id'):
+            self._room = value.id
+        else:
+            self._room = value
     
     def __repr__(self):
         return f"(g {self.group} | s {self.subject} | t {self.teacher} | d {self.duration}h | s_h {self.start_hour} | e_h {(self.start_hour + self.duration) - 1} | r {self.room})"

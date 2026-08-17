@@ -14,7 +14,7 @@ class CursoModel(Base):
     
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     seccion = Column(String(50), nullable=False)
-    year = Column(String(50), nullable=False)
+    year = Column(Integer, nullable=False)
     mencion_id = Column(Integer, ForeignKey("menciones.id", ondelete="SET NULL"), nullable=True)
 
 # 3. Modelo de Asignaturas

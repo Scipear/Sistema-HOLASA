@@ -12,7 +12,7 @@ class CursoService:
         self.repository = repository or CursoRepository()
         self.mencion_repository = mencion_repository or MencionRepository()
 
-    def crear(self, db: Session, seccion: str, year: str,
+    def crear(self, db: Session, seccion: str, year: int,
               mencion_id: int | None = None):
         """Crea un nuevo curso.
 
@@ -30,7 +30,7 @@ class CursoService:
         """
         if not seccion or not seccion.strip():
             raise ValueError("La sección del curso no puede estar vacía")
-        if not year or not year.strip():
+        if not year or not year:
             raise ValueError("El año del curso no puede estar vacío")
         if mencion_id is not None:
             mencion = self.mencion_repository.get_by_id(db, mencion_id)
@@ -38,7 +38,7 @@ class CursoService:
                 raise ValueError(f"Mención con id {mencion_id} no encontrada")
         try:
             obj = self.repository.create(
-                db, seccion=seccion.strip(), year=year.strip(),
+                db, seccion=seccion.strip(), year=year,
                 mencion_id=mencion_id
             )
             db.commit()
@@ -81,7 +81,7 @@ class CursoService:
         """
         return self.repository.count(db)
 
-    def obtener_por_year(self, db: Session, year: str):
+    def obtener_por_year(self, db: Session, year: int):
         """Obtiene cursos filtrados por año.
 
         Args:
@@ -106,7 +106,7 @@ class CursoService:
         return self.repository.get_by_mencion(db, mencion_id)
 
     def actualizar(self, db: Session, id: int, seccion: str | None = None,
-                   year: str | None = None,
+                   year: int | None = None,
                    mencion_id: int | None = None):
         """Actualiza un curso existente.
 
@@ -125,7 +125,7 @@ class CursoService:
         """
         if seccion is not None and not seccion.strip():
             raise ValueError("La sección del curso no puede estar vacía")
-        if year is not None and not year.strip():
+        if year is not None and not year:
             raise ValueError("El año del curso no puede estar vacío")
         if mencion_id is not None:
             mencion = self.mencion_repository.get_by_id(db, mencion_id)
@@ -135,7 +135,7 @@ class CursoService:
         if seccion is not None:
             kwargs["seccion"] = seccion.strip()
         if year is not None:
-            kwargs["year"] = year.strip()
+            kwargs["year"] = year
         if mencion_id is not None:
             kwargs["mencion_id"] = mencion_id
         try:

@@ -10,6 +10,8 @@ from src.database.repositories import (
     SesionProfesorRepository,
     CursoAsignaturaRepository,
     ProfesorAsignaturaRepository,
+    SalonCursoRepository,
+    SalonProfesorRepository
 )
 from src.engine.classes import Teacher, Subject, Academic_Hour, Room, Group, Event, Availability
 
@@ -64,6 +66,7 @@ class Data():
         try:
             rooms_db = SalonRepository().get_all(db)
             self.rooms = [Room(id=s.id, name=s.nombre) for s in rooms_db]
+            rooms_dict = {r.id: r for r in self.rooms}
 
             academic_hours_db = SesionRepository().get_all(db)
             sorted_academic_hours = sorted(academic_hours_db, key=self.academic_hours_sort)
@@ -94,6 +97,7 @@ class Data():
         
             for t in teachers_db:
                 teacher_availabilities = SesionProfesorRepository().get_by_profesor(db, t.id)
+                t_rooms = SalonProfesorRepository().get_by_profesor(db, t.id)
                 
                 availabilities = []
                 # Iteramos de 2 en 2 para agrupar los pares (inicio, fin)
@@ -106,12 +110,20 @@ class Data():
                     end_idx = id_to_index[end_id]
                     
                     availabilities.append(Availability(start_idx, end_idx))
+                
+                if t_rooms:
+                    teacher_rooms = []
+                    for r in t_rooms:
+                        teacher_rooms.append(rooms_dict[r.salon_id])
+                else:
+                    teacher_rooms = None
 
                 t_obj = Teacher(
                     id=t.id,
                     name=t.nombre,
                     last_name=t.apellido,
-                    availabilities=availabilities
+                    availabilities=availabilities,
+                    rooms=teacher_rooms
                 )
 
                 self.teachers.append(t_obj)
@@ -121,39 +133,48 @@ class Data():
             for g in groups_db:
                 speciality = MencionRepository().get_by_id(db, g.mencion_id)
                 subjs = CursoAsignaturaRepository().get_by_curso(db, g.id)
+                g_rooms = SalonCursoRepository().get_by_curso(db, g.id)
                 group_subjects = []
 
+                if g_rooms:
+                    groups_rooms = []
+                    for r in g_rooms:
+                        groups_rooms.append(rooms_dict[r.salon_id])
+                else:
+                    groups_rooms = None
+                    
                 for s in subjs:
                     subject = AsignaturaRepository().get_by_id(db, s.asignatura_id)
 
                     if not subject:
                         continue
 
-                    teachers_subject = ProfesorAsignaturaRepository().get_by_curso_asignatura(db, s.id)
-                    assigned_teachers = [
-                        teachers_dict[t.profesor_id]
-                        for t in teachers_subject
-                        if t.profesor_id in teachers_dict
-                    ]
-
-                    if not assigned_teachers:
-                        assigned_teachers = self.teachers
+                    teacher_subject = ProfesorAsignaturaRepository().get_by_curso_asignatura(db, s.id)
+                    ts = teacher_subject[0] if teacher_subject else None
+                    assigned_teacher = (
+                        teachers_dict[ts.profesor_id]
+                        if ts and ts.profesor_id in teachers_dict
+                        else None
+                    )
 
                     subj_obj = Subject(
                         id=s.id,  # Usamos el ID de la relación curso_asignatura
                         name=subject.nombre,
                         hours=s.horas_semanales,
                         subject_type=subject.tipo,
-                        teachers=assigned_teachers
+                        teacher=assigned_teacher
                     )
 
                     group_subjects.append(subj_obj)
                     self.subjects.append(subj_obj)
+                
                     
                 group_obj = Group(
                     id=g.id,
+                    year=g.year,
                     name=f"{g.year} {speciality.nombre} {g.seccion}",
-                    subjects=group_subjects
+                    subjects=group_subjects,
+                    rooms=groups_rooms
                 )
                 self.groups.append(group_obj)
 

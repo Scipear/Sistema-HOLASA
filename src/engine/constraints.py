@@ -9,7 +9,7 @@ def fitness(population: list[list[Event]], academic_hours: list[Academic_Hour], 
         # Extraemos solo el score numérico desestimando las listas de fallas con ', _'
         g_score, _ = groups_subjects(individual)
         t_score, _ = teachers_subjects(individual)
-        r_score = rooms_groups(individual) # Esta quedó igual que antes
+        r_score, _ = rooms_groups(individual) # Esta quedó igual que antes
         gap_score, _ = groups_gaps(individual, academic_hours, academic_hours_limits)
         sub_score, _ = subject_day(individual, academic_hours)
         
@@ -54,7 +54,7 @@ def teachers_subjects(individual: list[Event]):
     penalized_pairs = set()
 
     for event in individual:
-        if event.start_hour is None:
+        if event.start_hour is None or event.teacher is None:
             continue
 
         for block in range(event.start_hour, event.start_hour + event.duration):
@@ -68,7 +68,7 @@ def teachers_subjects(individual: list[Event]):
                 
                 # Solo sumamos al score de fitness si es la primera vez que detectamos este choque de eventos
                 if event_pair not in penalized_pairs:
-                    score += 150
+                    score += 250
                     penalized_pairs.add(event_pair)
                 
                     # Opcional: El reporte detallado puede seguir mostrando todos los bloques 
@@ -97,18 +97,37 @@ def teachers_subjects(individual: list[Event]):
 def rooms_groups(individual: list[Event]):
     score = 0
     rooms_occupation = {}
+    collisions = []
 
     for event in individual:
+        if event.start_hour is None:
+            continue
+        
         for block in range(event.start_hour, event.start_hour + event.duration):
-            if event.room != None:
+            if event.room is not None:
                 key = (event.room, block)
 
                 if key in rooms_occupation:
-                    score += 0 # 0 temporalmente hasta que sepa como se manejan los salones
+                    existing_event = rooms_occupation[key]
+                    score += 150
+                    collisions.append({
+                        "room_id": event.room,
+                        "block": block,
+                        "event_1": {
+                            "id": existing_event.id,
+                            "subject": existing_event.subject,
+                            "group": existing_event.group
+                        },
+                        "event_2": {
+                            "id": event.id,
+                            "subject": event.subject,
+                            "group": event.group
+                        }
+                    })
                 else:
                     rooms_occupation[key] = event
     
-    return score
+    return score, collisions
 
 def groups_gaps(individual: list[Event], academic_hours: list[Academic_Hour], academic_hours_limits: dict):
     score = 0

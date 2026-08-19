@@ -106,3 +106,26 @@ python src/engine/genetics.py
 ```bash
 python -m src.database.genetics
 ```
+
+---
+
+## 📄 Exportación de horarios a PDF
+
+Módulo independiente (`src/export/`) que genera un PDF por año de curso. 
+
+**Demo rápida** (genera un horario aleatorio al vuelo):
+
+```bash
+python -m src.export.demo --output-dir data/export
+```
+
+**Con el algoritmo genético** (exporta el mejor horario del motor):
+
+```bash
+python -m src.export.demo --genetics --generations 2000 --output-dir data/export
+```
+
+**Nota:** usa `python -m src.export.demo`, no `python src/export/demo.py`.
+
+Los PDFs se guardan en la carpeta indicada con el nombre
+`Horario_<año_escolar>_<año_curso>.pdf` (uno por año, una página por curso).

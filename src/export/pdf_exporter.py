@@ -12,6 +12,7 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
+from reportlab.lib.utils import ImageReader
 from reportlab.platypus import (
     PageBreak,
     Paragraph,
@@ -31,6 +32,11 @@ from src.database.repositories import (
 from src.database.repositories.salon_curso_repository import SalonCursoRepository
 
 DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"]
+
+_LOGO_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "..", "assets", "Salle_sin_bg.png"
+)
+_LOGO_HEIGHT = 15 * mm
 
 # Filas RECESO y ALMUERZO (no existen en la tabla de sesiones; son fijas de la plantilla)
 RECESO_LABEL = "8:20 a 8:30"
@@ -64,6 +70,30 @@ def _abbreviate_subject(name: str) -> str:
 def _year_label(year: str) -> str:
     """Convierte el año de la BD ('1') a ordinal legible ('1ro')."""
     return _YEAR_ORDINALS.get(str(year), f"{year}º")
+
+
+def _draw_logo(canvas, doc) -> None:
+    """Dibuja el logo de la Salle en la esquina superior izquierda de cada página."""
+    if not os.path.exists(_LOGO_PATH):
+        return
+    image = ImageReader(_LOGO_PATH)
+    width, height = image.getSize()
+    ratio = width / height
+    height = _LOGO_HEIGHT
+    width = height * ratio
+    x = doc.leftMargin
+    y = doc.pagesize[1] - doc.topMargin - height
+    canvas.saveState()
+    canvas.drawImage(
+        _LOGO_PATH,
+        x,
+        y,
+        width=width,
+        height=height,
+        preserveAspectRatio=True,
+        mask="auto",
+    )
+    canvas.restoreState()
 
 
 def _build_data_maps(data: Data) -> dict:
@@ -312,7 +342,7 @@ def export_year_pdf(
         _group_page_story(story, course_id, events, data, maps, year_label)
         if index < len(course_ids) - 1:
             story.append(PageBreak())
-    doc.build(story)
+    doc.build(story, onFirstPage=_draw_logo, onLaterPages=_draw_logo)
     return output_path
 
 

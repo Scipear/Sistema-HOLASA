@@ -104,6 +104,43 @@ def is_subject_already_on_day(scheduled_tracker: set, target_event: Event, candi
     # Comprobación instantánea en la tabla Hash
     return (target_event.group, target_event.subject, candidate_day) in scheduled_tracker
 
+def creates_one_hour_gap(candidate_hour: int, duration: int, group_taken_hours: set[int]) -> bool:
+    """Retorna True si colocar el evento en candidate_hour genera un bloque libre de exactamente 1 hora
+
+    en el horario del grupo (antes o después del evento).
+    """
+    total_hours = len(academic_hours)
+    candidate_day = academic_hours[candidate_hour].day_index
+
+    # --- 1. REVISAR HUECO ANTES DEL BLOQUE CANDIDATO ---
+    # Caso: [Clase] (h-2) -> [LIBRE] (h-1) -> [NUEVA CLASE] (candidate_hour)
+    prev_1 = candidate_hour - 1  # Hora libre candidata
+    prev_2 = candidate_hour - 2  # Hora de clase previa candidata
+
+    if prev_1 >= 0 and academic_hours[prev_1].day_index == candidate_day:
+        # La hora inmediatamente anterior está libre
+        if prev_1 not in group_taken_hours:
+            if prev_2 >= 0 and academic_hours[prev_2].day_index == candidate_day:
+                # Si 2 horas atrás hay clase, prev_1 queda como un hueco aislado de 1 hora
+                if prev_2 in group_taken_hours:
+                    return True
+
+    # --- 2. REVISAR HUECO DESPUÉS DEL BLOQUE CANDIDATO ---
+    # Caso: [NUEVA CLASE] -> [LIBRE] (end_hour + 1) -> [Clase] (end_hour + 2)
+    end_hour = candidate_hour + duration - 1
+    next_1 = end_hour + 1  # Hora libre candidata
+    next_2 = end_hour + 2  # Hora de clase posterior candidata
+
+    if next_1 < total_hours and academic_hours[next_1].day_index == candidate_day:
+        # La hora inmediatamente posterior está libre
+        if next_1 not in group_taken_hours:
+            if next_2 < total_hours and academic_hours[next_2].day_index == candidate_day:
+                # Si 2 horas después hay clase, next_1 queda como un hueco aislado de 1 hora
+                if next_2 in group_taken_hours:
+                    return True
+
+    return False
+
 def move_hour(start_hour_index: int, duration: int) -> int:
     """Mueve la hora de inicio retrocediendo un bloque o saltando de día, evitando horas bloqueadas."""
     candidate_idx = start_hour_index
@@ -226,7 +263,7 @@ def evaluate_group_day_schedule(group_taken_hours: set[int], candidate_h: int, d
     """
     day_idx = academic_hours[candidate_h].day_index
     
-    # 1. Obtener todas las horas del grupo ese día incluyendo el nuevo evento
+    # 1. Obtener todas las horas del grupo ese día incluyendo el evento candidato
     day_global_hours = [
         h for h in group_taken_hours 
         if academic_hours[h].day_index == day_idx
@@ -237,47 +274,36 @@ def evaluate_group_day_schedule(group_taken_hours: set[int], candidate_h: int, d
     if not all_day_hours:
         return 0.0
 
-    # Convertir horas globales a índice relativo del día (0 = 1ra hora, 1 = 2da hora, 2 = 3ra hora, etc.)
     min_day_global = academic_hours_limits[day_idx]["min"]
     rel_hours = [h - min_day_global for h in all_day_hours]
     
+    total_hours_today = len(rel_hours)
     first_hour = rel_hours[0]
     last_hour = rel_hours[-1]
     
-    # Identificar baches u horas libres intermedias
+    # Baches / huecos intermedios
     all_span_rel = set(range(first_hour, last_hour + 1))
     gap_rel_hours = sorted(all_span_rel - set(rel_hours))
     total_gap_hours = len(gap_rel_hours)
-    
-    # Contar bloques discontinuos de baches (ej: 1 hora libre, clase, 1 hora libre = 2 bloques)
-    gap_blocks_count = 0
-    if gap_rel_hours:
-        gap_blocks_count = 1
-        for i in range(1, len(gap_rel_hours)):
-            if gap_rel_hours[i] != gap_rel_hours[i - 1] + 1:
-                gap_blocks_count += 1
 
     penalty = 0.0
 
-    # CASO A: El grupo NO empieza a la 1ra hora (first_hour > 0)
-    if first_hour > 0:
-        # Regla 1: No debe exceder la 3ra hora del día (índice 2)
-        if first_hour > 2:
-            penalty += 1000.0 + (first_hour - 2) * 300.0
-        
-        # Regla 2: Si no empieza a la 1ra hora, 0 baches intermedios
-        if total_gap_hours > 0:
-            penalty += 500.0 + total_gap_hours * 150.0
+    # REGLA 1: Carga diaria mínima (Si hay clases el día, objetivo >= 6 horas)
+    # Si el día resulta en menos de 6 hrs, se castiga proporcionalmente a las horas faltantes
+    if total_hours_today < 6:
+        penalty += (6 - total_hours_today) * 350.0
 
-    # CASO B: El grupo SÍ empieza a la 1ra hora (first_hour == 0)
-    else:
-        # Regla 1: Máximo 2 horas libres en el día
-        if total_gap_hours > 2:
-            penalty += 500.0 + (total_gap_hours - 2) * 200.0
+    # REGLA 2: Hora de entrada (Evitar iniciar a las 10:00 - 11:00 AM)
+    if first_hour == 1:
+        # Entrar a la 2da hora (ej: 8:00 AM) tiene una penalización leve
+        penalty += 10.0
+    elif first_hour >= 2:
+        # Entrar a la 3ra hora o más tarde se penaliza fuertemente
+        penalty += 800.0 + (first_hour - 1) * 400.0
 
-        # Regla 2: Preferencia por baches seguidos (bloques discontinuos incrementan penalización)
-        if gap_blocks_count > 1:
-            penalty += (gap_blocks_count - 1) * 80.0
+    # REGLA 3: Baches / Huecos en la jornada
+    if total_gap_hours > 0:
+        penalty += total_gap_hours * 300.0
 
     return penalty
 
@@ -410,7 +436,8 @@ def create_timetable(events: list[Event], blocked_hours_by_group: dict = None):
             if (not groups_block[event.group].intersection(event_hours) and 
                 not teachers_block[event.teacher].intersection(event_hours) and 
                 is_teacher_available(event.teacher, start_hour, event.duration) and
-                not is_subject_already_on_day(scheduled_subjects, event, start_hour)):
+                not is_subject_already_on_day(scheduled_subjects, event, start_hour) and
+                not creates_one_hour_gap(start_hour, event.duration, groups_block[event.group])):
                 
                 event.start_hour = start_hour
                 groups_block[event.group].update(event_hours)
@@ -608,13 +635,20 @@ def mutation(individual: list[Event], blocked_hours_by_group: dict = None):
             if rand_val < MUTATION_RATE:
                 s_hour = event.start_hour
 
+                group_taken_hours = {
+                    h for e in individual
+                    if e.id != event.id and e.start_hour is not None and e.group == event.group
+                    for h in range(e.start_hour, e.start_hour + e.duration)
+                }
+
                 for _ in range(50):
                     new_hour = move_hour(s_hour, event.duration)
                     hours_block = set(range(new_hour, new_hour + event.duration))
 
                     if (not taken_hours.intersection(hours_block) and
                         is_teacher_available(event.teacher, new_hour, event.duration) and
-                        not is_subject_already_on_day(scheduled_subjects, event, new_hour)):
+                        not is_subject_already_on_day(scheduled_subjects, event, new_hour) and
+                        not creates_one_hour_gap(new_hour, event.duration, group_taken_hours)):
 
                         event.start_hour = new_hour
                         break
@@ -641,12 +675,8 @@ def mutation(individual: list[Event], blocked_hours_by_group: dict = None):
                                     valid_hours_for_prof.append(h)
                                 
                     if valid_hours_for_prof:
-                        chosen_h = select_best_hour(
-                            candidate_hours=valid_hours_for_prof,
-                            event=event,
-                            taken_hours_group=taken_hours,
-                            scheduled_subjects=scheduled_subjects
-                        )
+                        chosen_h = select_best_hour(valid_hours_for_prof, event, taken_hours, scheduled_subjects)
+
                         if chosen_h is not None:
                             event.start_hour = chosen_h
                     
@@ -690,7 +720,7 @@ def main():
         else:
             count = 0
 
-        if count > 100:
+        if count > 150:
             print("El algoritmo se ha estancado, no hubo solucion posible esta generacion")
             break
             count = 0
@@ -728,7 +758,20 @@ def main():
     print(f"\n[!] Baches y Ventanas Horarias de Alumnos: {len(final_report['gaps'])}")
     dias_semana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"]
     for fail in final_report['gaps']:
-        print(f"  - Grupo {fail['group']} ({dias_semana[fail['day']]}): {fail['type']}. Tiene {fail['gaps_count']} horas muertas en los bloques internos: {fail['hours']}.")
+        gaps_count = fail.get('gaps_count', 0)
+        hours = fail.get('hours', [])
+        
+        # Construir el detalle del mensaje según el tipo de falla
+        if 'gaps_count' in fail:
+            detalle = f"Tiene {gaps_count} horas muertas en los bloques internos: {hours}"
+        elif 'hours_count' in fail:
+            detalle = f"Carga total del día: {fail['hours_count']} horas lectivas"
+        elif 'first_hour' in fail:
+            detalle = f"Inicio de jornada a las {fail['first_hour']}"
+        else:
+            detalle = ""
+
+        print(f"  - Grupo {fail['group']} ({dias_semana[fail['day']]}): {fail['type']}. {detalle}.")
 
     print(f"\n[!] Materias Repetidas el Mismo Día: {len(final_report['subject_duplications'])}")
     for fail in final_report['subject_duplications']:

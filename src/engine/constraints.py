@@ -109,7 +109,7 @@ def rooms_groups(individual: list[Event]):
 
                 if key in rooms_occupation:
                     existing_event = rooms_occupation[key]
-                    score += 150
+                    score += 70
                     collisions.append({
                         "room_id": event.room,
                         "block": block,
@@ -134,12 +134,12 @@ def groups_gaps(individual: list[Event], academic_hours: list[Academic_Hour], ac
     timetable_map = {}
     gaps_report = []
 
+    # 1. Mapear bloques ocupados por cada grupo y día
     for event in individual:
         if event.start_hour is None:
             continue
 
         for block in range(event.start_hour, event.start_hour + event.duration):
-            # Obtenemos la hora académica mapeada con el slot_index
             ah = academic_hours[block]
             day = ah.day_index
             
@@ -149,16 +149,22 @@ def groups_gaps(individual: list[Event], academic_hours: list[Academic_Hour], ac
             if day not in timetable_map[event.group]:
                 timetable_map[event.group][day] = set()
                 
-            # Guardamos el índice virtual (block) para medir huecos en la secuencia
             timetable_map[event.group][day].add(block)
 
+    # 2. Evaluar reglas por grupo y día activo
     for group, days in timetable_map.items():
         for day, occupied_hours in days.items():
             if not occupied_hours:
                 continue
             
+            min_day_block = academic_hours_limits[day]["min"]
             first_block = min(occupied_hours)
             last_block = max(occupied_hours)
+            
+            total_hours = len(occupied_hours)
+            first_relative_hour = first_block - min_day_block  # 0 = 1ra hora, 1 = 2da hora, 2 = 3ra hora (>= 10:00 AM)
+
+            # --- A. DETECCIÓN Y PENALIZACIÓN DE HUECOS / BACHES ---
             gaps_count = 0
             specific_hours = []
 
@@ -167,30 +173,42 @@ def groups_gaps(individual: list[Event], academic_hours: list[Academic_Hour], ac
                     gaps_count += 1
                     specific_hours.append(academic_hours[block].start_hour)
             
-            if gaps_count > 0:
-                min_day_block = academic_hours_limits[day]["min"]
-                is_late_entry = first_block > min_day_block
+            if gaps_count > 2:
+                gap_penalty = gaps_count * 150
+                score += gap_penalty
+                gaps_report.append({
+                    "group": group,
+                    "day": day,
+                    "type": "Huecos intermedios en la jornada",
+                    "gaps_count": gaps_count,
+                    "hours": specific_hours,
+                    "penalty": gap_penalty
+                })
 
-                if is_late_entry:
-                    score += gaps_count * 80
-                    gaps_report.append({
-                        "group": group,
-                        "day": day,
-                        "type": "Entrada tarde con baches (No permitido)",
-                        "gaps_count": gaps_count,
-                        "hours": specific_hours
-                    })
-                else:
-                    max_allowed_gaps = 2
-                    if gaps_count > max_allowed_gaps:
-                        score += (gaps_count - max_allowed_gaps) * 40
-                        gaps_report.append({
-                            "group": group,
-                            "day": day,
-                            "type": f"Exceso de horas libres (Permitido: {max_allowed_gaps})",
-                            "gaps_count": gaps_count,
-                            "hours": specific_hours
-                        })
+            # --- B. PENALIZACIÓN POR DÍA CORTO (< 6 horas lectivas) ---
+            if total_hours < 6:
+                short_day_penalty = (6 - total_hours) * 200
+                score += short_day_penalty
+                gaps_report.append({
+                    "group": group,
+                    "day": day,
+                    "type": f"Día corto ({total_hours} hrs lectivas, mínimo 6)",
+                    "hours_count": total_hours,
+                    "penalty": short_day_penalty
+                })
+
+            # --- C. PENALIZACIÓN POR ENTRADA TARDÍA (>= 3ra hora relativa / ~10:00 AM) ---
+            if first_relative_hour > 2:
+                late_penalty = (first_relative_hour - 1) * 250
+                score += late_penalty
+                gaps_report.append({
+                    "group": group,
+                    "day": day,
+                    "type": f"Entrada tardía (Inicia en hora relativa {first_relative_hour + 1})",
+                    "first_hour": academic_hours[first_block].start_hour,
+                    "penalty": late_penalty
+                })
+
     return score, gaps_report
 
 def subject_day(individual: list[Event], academic_hours: list[Academic_Hour]):

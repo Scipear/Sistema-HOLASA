@@ -121,7 +121,7 @@ def vista_cursos():
     
     dd_horas_asig = ft.Dropdown(
         label="Horas",
-        options=[ft.dropdown.Option(str(h)) for h in range(1, 9)],
+        options=[ft.dropdown.Option(str(h)) for h in range(1, 11)],
         value=None,
         border_color="#303346",
         focused_border_color="#439A5D",

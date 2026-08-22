@@ -1,3 +1,4 @@
 __pycache__/
 .venv
 HOLASA-DB.sqlite3
+data/export

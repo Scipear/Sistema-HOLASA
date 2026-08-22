@@ -438,7 +438,7 @@ def vista_sesiones(on_volver_menu=None):
         for d in DIAS_SEMANA:
             contadores_dia[d].value = str(conteo[d])
 
-    # Carga inicial de datos al abrir la vista
+    # Carga inicial de datos 
     cargar_datos_db()
 
     # =========================================================================

@@ -67,7 +67,7 @@ def vista_dashboard(on_navigate=None):
               ft.Row([
                   ft.Icon(ft.icons.SCHOOL, color="#FFFFFF", size=22),
                   ft.Text(
-                      "E.T.I Fundación la Salle de Ciencias Naturales",
+                      "E.T.I. Fundación la Salle de Ciencias Naturales",
                       size=16,
                       weight=ft.FontWeight.BOLD,
                       color="#FFFFFF",
@@ -75,7 +75,7 @@ def vista_dashboard(on_navigate=None):
                   ),
               ], spacing=10),
               ft.Container(height=4),
-              fila_info("Sede:", "Ciudad Guayana, San Félix", "#FFFFFF"),
+              fila_info("Sede:", "Ciudad Guayana", "#FFFFFF"),
               fila_info("Año Académico:", anio_academico_actual, "#FFFFFF"),
               fila_info("Estado del Sistema:", "Operativo", "#FFFFFF"),
           ],

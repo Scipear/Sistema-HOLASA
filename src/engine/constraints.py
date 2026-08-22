@@ -33,7 +33,7 @@ def groups_subjects(individual: list[Event]):
 
             if key in groups_occupation:
                 existing_event = groups_occupation[key]
-                score += 200
+                score += 1250
                 collisions.append({
                     "group": event.group,
                     "block": block,
@@ -68,7 +68,7 @@ def teachers_subjects(individual: list[Event]):
                 
                 # Solo sumamos al score de fitness si es la primera vez que detectamos este choque de eventos
                 if event_pair not in penalized_pairs:
-                    score += 250
+                    score += 2000
                     penalized_pairs.add(event_pair)
                 
                     # Opcional: El reporte detallado puede seguir mostrando todos los bloques 
@@ -109,7 +109,7 @@ def rooms_groups(individual: list[Event]):
 
                 if key in rooms_occupation:
                     existing_event = rooms_occupation[key]
-                    score += 70
+                    score += 0
                     collisions.append({
                         "room_id": event.room,
                         "block": block,
@@ -173,8 +173,8 @@ def groups_gaps(individual: list[Event], academic_hours: list[Academic_Hour], ac
                     gaps_count += 1
                     specific_hours.append(academic_hours[block].start_hour)
             
-            if gaps_count > 2:
-                gap_penalty = gaps_count * 150
+            if gaps_count > 0:
+                gap_penalty = gaps_count * 400
                 score += gap_penalty
                 gaps_report.append({
                     "group": group,
@@ -187,7 +187,7 @@ def groups_gaps(individual: list[Event], academic_hours: list[Academic_Hour], ac
 
             # --- B. PENALIZACIÓN POR DÍA CORTO (< 6 horas lectivas) ---
             if total_hours < 6:
-                short_day_penalty = (6 - total_hours) * 200
+                short_day_penalty = (6 - total_hours) * 400
                 score += short_day_penalty
                 gaps_report.append({
                     "group": group,
@@ -199,7 +199,7 @@ def groups_gaps(individual: list[Event], academic_hours: list[Academic_Hour], ac
 
             # --- C. PENALIZACIÓN POR ENTRADA TARDÍA (>= 3ra hora relativa / ~10:00 AM) ---
             if first_relative_hour > 2:
-                late_penalty = (first_relative_hour - 1) * 250
+                late_penalty = (first_relative_hour - 1) * 400
                 score += late_penalty
                 gaps_report.append({
                     "group": group,
@@ -230,7 +230,7 @@ def subject_day(individual: list[Event], academic_hours: list[Academic_Hour]):
             
         # Si la materia ya fue registrada este día, guardamos la falla
         if event.subject in group_day_subjects[event.group][day]:
-            score += 175
+            score += 300
             existing_event_id = group_day_subjects[event.group][day][event.subject]
             subject_duplications.append({
                 "group": event.group,

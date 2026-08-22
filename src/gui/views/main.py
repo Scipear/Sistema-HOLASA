@@ -1,6 +1,4 @@
 import flet as ft
-
-
 from src.gui.views.dashboard import vista_dashboard
 from src.gui.views.profesores import vista_profesores
 from src.gui.views.materias import vista_materias
@@ -10,10 +8,6 @@ from src.gui.views.salones import vista_salones
 from src.gui.views.cursos import vista_cursos
 from src.gui.views.generacion import vista_generacion
 from src.gui.views.horario import vista_horario
-
-
-
-
 
 NAV_ITEMS = [
     {"id": "dashboard",  "label": "Dashboard",    "icono": ft.icons.DASHBOARD_OUTLINED,     "icono_sel": ft.icons.DASHBOARD},
@@ -29,7 +23,7 @@ NAV_ITEMS = [
 ]
 
 def main(page: ft.Page):
-    page.title = "E.T.I Fundación La Salle - HOLASA"
+    page.title = "E.T.I. Fundación La Salle - HOLASA"
     page.bgcolor = "#13141C"
     page.padding = 0
     page.theme_mode = ft.ThemeMode.DARK

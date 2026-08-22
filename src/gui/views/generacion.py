@@ -1,59 +1,16 @@
 import flet as ft
-import time
+import threading
+import os
 
-CURSOS_DISPONIBLES = [
-    "4to - EO - A", "4to - EO - B", "4to - EL - A",
-    "4to - MM - A", "4to - MT - A", "5to - EO - A", "5to - EL - A"
-]
+# Importaciones de tus módulos del proyecto
+try:
+    from src.engine import genetics
+    from src.export.pdf_exporter import export_all
+except ImportError:
+    # Manejo de fallback en caso de ejecuciones aisladas
+    genetics = None
+    export_all = None
 
-HORARIO_GENERADO_DEMO = {
-    "4to - EO - A": {
-        "Lunes":     ["Matemáticas / Prof. Navarro / Aula 3", "Matemáticas / Prof. Navarro / Aula 3",
-                      "Física / Prof. Isea / Aula 5", "Física / Prof. Isea / Aula 5",
-                      "", "Circ. Eléctricos / Prof. Peraza / Taller 2", "Circ. Eléctricos / Prof. Peraza / Taller 2",
-                      "Ed. Física / - / Cancha", "Ed. Física / - / Cancha", ""],
-        "Martes":    ["Lenguaje / Prof. López / Aula 1", "Lenguaje / Prof. López / Aula 1",
-                      "", "", "Sist. Digitales / Prof. Isea / Lab 1", "Sist. Digitales / Prof. Isea / Lab 1",
-                      "", "Matemáticas / Prof. Navarro / Aula 3", "Matemáticas / Prof. Navarro / Aula 3", ""],
-        "Miércoles": ["Física / Prof. Isea / Aula 5", "Física / Prof. Isea / Aula 5",
-                      "", "Circ. Eléctricos / Prof. Peraza / Taller 2", "Circ. Eléctricos / Prof. Peraza / Taller 2",
-                      "", "Lenguaje / Prof. López / Aula 1", "", "", ""],
-        "Jueves":    ["Sist. Digitales / Prof. Isea / Lab 1", "Sist. Digitales / Prof. Isea / Lab 1",
-                      "", "Matemáticas / Prof. Navarro / Aula 3", "Matemáticas / Prof. Navarro / Aula 3",
-                      "Ed. Física / - / Cancha", "Ed. Física / - / Cancha", "", "", ""],
-        "Viernes":   ["Circ. Eléctricos / Prof. Peraza / Taller 2", "Circ. Eléctricos / Prof. Peraza / Taller 2",
-                      "Lenguaje / Prof. López / Aula 1", "",
-                      "Física / Prof. Isea / Aula 5", "Física / Prof. Isea / Aula 5",
-                      "", "Sist. Digitales / Prof. Isea / Lab 1", "Sist. Digitales / Prof. Isea / Lab 1", ""],
-    }
-}
-
-DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"]
-BLOQUES = [
-    "7:00 - 7:40", "7:40 - 8:20", "8:30 - 9:10", "9:10 - 9:50",
-    "9:50 - 10:30", "10:30 - 11:10", "11:10 - 11:50",
-    "12:10 - 12:50", "12:50 - 1:30", "1:30 - 2:10"
-]
-RECESO = "11:50 - 12:10"
-
-COLORES_MATERIAS = {}
-PALETA_BG = ["#1A3A5C", "#1A2A20", "#332415", "#1A3A38", "#2A2D3E", "#3A1A2A", "#1C2A40"]
-PALETA_TX = ["#5B9BD5", "#439A5D", "#E69138", "#76C7C0", "#C0C0C0", "#E091C0", "#8FBBDE"]
-
-def color_materia(nombre):
-    if not nombre:
-        return None
-    key = nombre.split("/")[0].strip()
-    if key not in COLORES_MATERIAS:
-        COLORES_MATERIAS[key] = PALETA_BG[len(COLORES_MATERIAS) % len(PALETA_BG)]
-    return COLORES_MATERIAS[key]
-
-def color_texto_materia(nombre):
-    if not nombre:
-        return None
-    key = nombre.split("/")[0].strip()
-    idx = list(COLORES_MATERIAS.keys()).index(key) if key in COLORES_MATERIAS else 0
-    return PALETA_TX[idx % len(PALETA_TX)]
 
 def vista_generacion():
     estilo_tarjeta_oscura = {
@@ -63,117 +20,32 @@ def vista_generacion():
         "border": ft.border.all(1, "#303346")
     }
 
-    estado_ref = {"generado": False, "en_progreso": False}
-
-    grilla_ref = ft.Column(spacing=0)
-    dd_curso_preview = ft.Dropdown(
-        label="Seleccionar Curso",
-        options=[ft.dropdown.Option(c) for c in CURSOS_DISPONIBLES],
-        value=CURSOS_DISPONIBLES[0],
-        border_color="#303346", focused_border_color="#439A5D", border_radius=10,
-        bgcolor="#13141C", color=ft.colors.WHITE, width=240
-    )
+    # Estado de la vista y almacenamiento del resultado
+    estado_ref = {
+        "generado": False, 
+        "en_progreso": False,
+        "best_timetable": None
+    }
 
     progreso_bar = ft.ProgressBar(
-        value=0, bgcolor="#1A1C28", color="#439A5D", height=6, border_radius=3, visible=False
+        value=0, bgcolor="#1A1C28", color="#439A5D", height=6, visible=False
     )
     txt_progreso = ft.Text("", color="#A0A0B0", size=12, visible=False)
 
-    panel_vacio = ft.Container(
+    # Panel informativo simplificado (sin la grilla de previsualización)
+    panel_info_estado = ft.Container(
         expand=True,
         content=ft.Column([
-            ft.Icon(ft.icons.CALENDAR_TODAY, size=60, color="#303346"),
-            ft.Text("Sin horario generado", size=18, color="#5A5D70", weight=ft.FontWeight.BOLD),
-            ft.Text("Configura los parámetros y presiona Generar Horario", size=13, color="#5A5D70"),
+            ft.Icon(ft.icons.AUTO_AWESOME, size=60, color="#303346"),
+            ft.Text("Generación de Horarios", size=20, color="#FFFFFF", weight=ft.FontWeight.BOLD),
+            ft.Text(
+                "Presiona 'Generar Horario' para ejecutar el algoritmo genético y exportar los archivos PDF correspondientes.",
+                size=13, color="#A0A0B0", text_align=ft.TextAlign.CENTER
+            ),
         ], horizontal_alignment=ft.CrossAxisAlignment.CENTER,
            alignment=ft.MainAxisAlignment.CENTER, spacing=12),
         alignment=ft.alignment.center
     )
-
-    panel_resultado = ft.Container(expand=True, visible=False, content=ft.Column([
-        ft.Row([
-            ft.Icon(ft.icons.GRID_ON, color="#439A5D"),
-            ft.Text("Horario Semanal", size=16, weight=ft.FontWeight.BOLD, color=ft.colors.WHITE),
-            ft.Container(expand=True),
-            dd_curso_preview,
-        ]),
-        ft.Container(
-            content=ft.Column([grilla_ref], scroll=ft.ScrollMode.AUTO),
-            expand=True
-        )
-    ], spacing=15, expand=True))
-
-    def celda_clase(contenido, is_receso=False):
-        if is_receso:
-            return ft.Container(
-                height=38, bgcolor="#0F1018", border=ft.border.all(1, "#303346"),
-                content=ft.Text("RECESO", color="#5A5D70", size=11, italic=True,
-                                 text_align=ft.TextAlign.CENTER),
-                alignment=ft.alignment.center
-            )
-        if not contenido:
-            return ft.Container(height=50, bgcolor="#13141C", border=ft.border.all(1, "#222435"))
-        partes = contenido.split(" / ")
-        materia = partes[0] if len(partes) > 0 else ""
-        profesor = partes[1] if len(partes) > 1 else ""
-        aula = partes[2] if len(partes) > 2 else ""
-        bg = color_materia(materia) or "#1E202D"
-        col = color_texto_materia(materia) or "#A0A0B0"
-        return ft.Container(
-            height=50, bgcolor=bg, border=ft.border.all(1, "#303346"),
-            padding=ft.padding.symmetric(horizontal=6, vertical=4),
-            content=ft.Column([
-                ft.Text(materia, color=col, size=11, weight=ft.FontWeight.BOLD,
-                        overflow=ft.TextOverflow.ELLIPSIS, max_lines=1),
-                ft.Text(profesor, color="#A0A0B0", size=10, overflow=ft.TextOverflow.ELLIPSIS),
-                ft.Text(aula, color="#5A5D70", size=9),
-            ], spacing=1)
-        )
-
-    def celda_hora(hora, is_receso=False):
-        return ft.Container(
-            width=100, height=50 if not is_receso else 38,
-            bgcolor="#1A1C28" if not is_receso else "#0F1018",
-            border=ft.border.all(1, "#303346"),
-            padding=ft.padding.symmetric(horizontal=8, vertical=4),
-            content=ft.Text(hora, color="#A0A0B0" if not is_receso else "#5A5D70",
-                            size=10, text_align=ft.TextAlign.CENTER),
-            alignment=ft.alignment.center
-        )
-
-    def celda_cabecera(texto):
-        return ft.Container(
-            expand=True, height=40, bgcolor="#1A1C28",
-            border=ft.border.all(1, "#303346"),
-            content=ft.Text(texto, color=ft.colors.WHITE, weight=ft.FontWeight.BOLD,
-                            size=12, text_align=ft.TextAlign.CENTER),
-            alignment=ft.alignment.center
-        )
-
-    def construir_grilla(curso):
-        grilla_ref.controls.clear()
-        horario = HORARIO_GENERADO_DEMO.get(curso, {d: [""] * len(BLOQUES) for d in DIAS})
-        grilla_ref.controls.append(
-            ft.Row([celda_hora("Hora")] + [celda_cabecera(d) for d in DIAS], spacing=0)
-        )
-        for i, bloque in enumerate(BLOQUES):
-            fila = [celda_hora(bloque)]
-            for dia in DIAS:
-                celdas_dia = horario.get(dia, [""] * len(BLOQUES))
-                contenido = celdas_dia[i] if i < len(celdas_dia) else ""
-                fila.append(ft.Container(expand=True, content=celda_clase(contenido)))
-            grilla_ref.controls.append(ft.Row(fila, spacing=0))
-            if i == 6:
-                fila_receso = [celda_hora(RECESO, is_receso=True)] + [
-                    ft.Container(expand=True, content=celda_clase("", is_receso=True)) for _ in DIAS
-                ]
-                grilla_ref.controls.append(ft.Row(fila_receso, spacing=0))
-
-    def cambiar_curso_preview(e):
-        construir_grilla(dd_curso_preview.value)
-        e.page.update()
-
-    dd_curso_preview.on_change = cambiar_curso_preview
 
     btn_generar = ft.ElevatedButton(
         "Generar Horario",
@@ -203,22 +75,22 @@ def vista_generacion():
         visible=False,
         content=ft.Row([
             ft.Icon(ft.icons.CHECK_CIRCLE, color="#439A5D", size=16),
-            ft.Text("Generado correctamente", color="#439A5D", size=12, weight=ft.FontWeight.BOLD)
+            ft.Text("Generado y exportado correctamente", color="#439A5D", size=12, weight=ft.FontWeight.BOLD)
         ]),
         bgcolor="#1A2A20", border_radius=10,
         padding=ft.padding.symmetric(horizontal=14, vertical=8),
         border=ft.border.all(1, "#439A5D")
     )
 
+    # Componentes visuales de configuración
     sw_priorizar_prof = ft.Switch(value=True, active_color="#439A5D")
     sw_priorizar_elec = ft.Switch(value=False, active_color="#439A5D")
-    sw_priorizar_prio = ft.Switch(value=False, active_color="#439A5D")
     sw_min_vacios = ft.Switch(value=True, active_color="#439A5D")
     sw_aulas_tec = ft.Switch(value=True, active_color="#439A5D")
 
     dd_anio = ft.Dropdown(
-        options=[ft.dropdown.Option("2024-2"), ft.dropdown.Option("2025-1")],
-        value="2024-2",
+        options=[ft.dropdown.Option("2024 - 2025"), ft.dropdown.Option("2025 - 2026")],
+        value="2025 - 2026",
         border_color="#303346", focused_border_color="#439A5D",
         bgcolor="#13141C", color=ft.colors.WHITE,
         height=45, border_radius=10
@@ -229,36 +101,84 @@ def vista_generacion():
             ft.Text(etiqueta, color=ft.colors.WHITE, size=13, expand=True), sw
         ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
 
-    def iniciar_generacion(e):
-        if estado_ref["en_progreso"]:
+    # -------------------------------------------------------------
+    # EJECUCIÓN DEL ALGORITMO GENÉTICO EN SEGUNDO PLANO
+    # -------------------------------------------------------------
+    def ejecutar_algoritmo_genetico(page):
+        max_generaciones = 250
+
+        if genetics is None:
+            page.snack_bar = ft.SnackBar(ft.Text("Error: No se pudo importar src.engine.genetics"))
+            page.snack_bar.open = True
+            page.update()
             return
-        estado_ref["en_progreso"] = True
-        progreso_bar.visible = True
-        txt_progreso.visible = True
-        btn_generar.disabled = True
-        btn_regenerar.disabled = True
-        panel_vacio.visible = True
-        panel_resultado.visible = False
-        badge_estado.visible = False
-        e.page.update()
 
-        pasos = [
-            ("Analizando disponibilidad docente...", 0.2),
-            ("Asignando sesiones por mención...", 0.45),
-            ("Optimizando distribución de aulas...", 0.65),
-            ("Resolviendo conflictos de horario...", 0.85),
-            ("Finalizando generación...", 1.0),
-        ]
-        for texto, valor in pasos:
-            progreso_bar.value = valor
-            txt_progreso.value = texto
-            e.page.update()
-            time.sleep(0.5)
+        # 1. Inicialización de eventos y población
+        events = genetics.create_events()
+        population = genetics.create_population(50, events)
+        past_value = 0
+        count = 0
 
+        academic_hours = getattr(genetics, 'academic_hours', None)
+        academic_hours_limits = getattr(genetics, 'academic_hours_limits', None)
+
+        for i in range(max_generaciones):
+            if academic_hours is not None and academic_hours_limits is not None:
+                scores = genetics.fitness(population, academic_hours, academic_hours_limits)
+            else:
+                scores = genetics.fitness(population)
+
+            fitness_population = list(zip(scores, population))
+            fitness_population.sort(key=lambda x: x[0])
+            best_fitness = fitness_population[0][0]
+
+            selected_population = genetics.selection(fitness_population, 10)
+            population = genetics.crossover(selected_population, 50)
+
+            if past_value == best_fitness:
+                count += 1
+            else:
+                count = 0
+
+            progreso = (i + 1) / max_generaciones
+            progreso_bar.value = progreso
+            txt_progreso.value = f"Generación {i+1}/{max_generaciones} - Mejor Fitness: {best_fitness}"
+            page.update()
+
+            if count > 150:
+                txt_progreso.value = f"Algoritmo estancado en gen {i+1}. Finalizando..."
+                page.update()
+                break
+
+            past_value = best_fitness
+
+        # Evaluación final y obtención del mejor horario
+        if academic_hours is not None and academic_hours_limits is not None:
+            scores = genetics.fitness(population, academic_hours, academic_hours_limits)
+        else:
+            scores = genetics.fitness(population)
+
+        fitness_population = list(zip(scores, population))
+        fitness_population.sort(key=lambda x: x[0])
+        best_timetable = fitness_population[0][1]
+        
+        # Guardamos en memoria el mejor horario calculado
+        estado_ref["best_timetable"] = best_timetable
+
+        # 2. Exportación a PDF llamando a export_all DIRECTAMENTE con el timetable calculado
+        if export_all is not None:
+            txt_progreso.value = "Generando archivos PDF de exportación..."
+            page.update()
+            export_all(
+                timetable=best_timetable,
+                output_dir="data/export",
+                year_label=dd_anio.value
+            )
+
+        # Finalizar estado de la interfaz
         estado_ref["generado"] = True
         estado_ref["en_progreso"] = False
-        COLORES_MATERIAS.clear()
-        construir_grilla(dd_curso_preview.value)
+
         progreso_bar.visible = False
         txt_progreso.visible = False
         btn_generar.disabled = False
@@ -267,25 +187,51 @@ def vista_generacion():
         btn_regenerar.visible = True
         btn_exportar.visible = True
         badge_estado.visible = True
-        panel_vacio.visible = False
-        panel_resultado.visible = True
+        page.update()
+
+    def iniciar_generacion(e):
+        if estado_ref["en_progreso"]:
+            return
+        estado_ref["en_progreso"] = True
+        progreso_bar.value = 0
+        progreso_bar.visible = True
+        txt_progreso.visible = True
+        txt_progreso.value = "Iniciando algoritmo genético..."
+        btn_generar.disabled = True
+        btn_regenerar.disabled = True
+        badge_estado.visible = False
         e.page.update()
+
+        threading.Thread(target=ejecutar_algoritmo_genetico, args=(e.page,), daemon=True).start()
 
     def regenerar(e):
         btn_regenerar.visible = False
         btn_exportar.visible = False
         btn_generar.visible = True
         badge_estado.visible = False
-        panel_vacio.visible = True
-        panel_resultado.visible = False
         e.page.update()
         iniciar_generacion(e)
 
     def exportar(e):
+        output_dir = "data/export"
+        best_timetable = estado_ref.get("best_timetable")
+
+        if export_all is not None and best_timetable is not None:
+            export_all(
+                timetable=best_timetable,
+                output_dir=output_dir,
+                year_label=dd_anio.value
+            )
+            msj = f"Horarios exportados exitosamente en '{output_dir}'"
+        elif best_timetable is None:
+            msj = "Primero debes generar un horario antes de exportar."
+        else:
+            msj = "Módulo de exportación no disponible"
+
         e.page.snack_bar = ft.SnackBar(
             ft.Row([
-                ft.Icon(ft.icons.CHECK_CIRCLE, color="#439A5D"),
-                ft.Text("Horarios exportados correctamente", color=ft.colors.WHITE)
+                ft.Icon(ft.icons.CHECK_CIRCLE if best_timetable else ft.icons.WARNING, color="#439A5D"),
+                ft.Text(msj, color=ft.colors.WHITE)
             ]),
             bgcolor="#1A2A20"
         )
@@ -354,15 +300,6 @@ def vista_generacion():
             ft.Divider(color="#303346", height=8),
             ft.Text("Advertencias", color="#A0A0B0", size=13, weight=ft.FontWeight.BOLD),
             ft.Container(
-                bgcolor="#332415", border_radius=10,
-                padding=ft.padding.symmetric(horizontal=12, vertical=8),
-                border=ft.border.all(1, "#E69138"),
-                content=ft.Row([
-                    ft.Icon(ft.icons.WARNING_AMBER, color="#E69138", size=16),
-                    ft.Text("2 docentes sin disponibilidad completa", color="#E69138", size=12)
-                ])
-            ),
-            ft.Container(
                 bgcolor="#1A2A20", border_radius=10,
                 padding=ft.padding.symmetric(horizontal=12, vertical=8),
                 border=ft.border.all(1, "#439A5D"),
@@ -393,23 +330,19 @@ def vista_generacion():
                     spacing=20,
                     vertical_alignment=ft.CrossAxisAlignment.START,
                     controls=[
-                        ft.Column(expand=3, spacing=20, controls=[panel_config, panel_stats]),
-                        ft.Column(expand=7, spacing=0, expand_loose=True, controls=[
-                            ft.Container(
-                                **estilo_tarjeta_oscura,
-                                expand=True,
-                                content=ft.Column([
-                                    ft.Row([
-                                        ft.Icon(ft.icons.GRID_ON, color="#439A5D"),
-                                        ft.Text("Vista Previa del Horario", size=16, weight=ft.FontWeight.BOLD, color=ft.colors.WHITE),
-                                    ]),
-                                    ft.Container(
-                                        expand=True,
-                                        content=ft.Column([panel_vacio, panel_resultado], expand=True)
-                                    )
-                                ], spacing=15, expand=True)
-                            )
-                        ])
+                        ft.Column(expand=4, spacing=20, controls=[panel_config, panel_stats]),
+                        ft.Column(
+                            expand=6,
+                            spacing=0,
+                            expand_loose=True,
+                            controls=[
+                                ft.Container(
+                                    **estilo_tarjeta_oscura,
+                                    expand=True,
+                                    content=panel_info_estado
+                                )
+                            ]
+                        )
                     ]
                 )
             ],

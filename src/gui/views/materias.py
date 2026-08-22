@@ -534,7 +534,6 @@ def vista_materias(on_volver_menu=None):
 
         txt_total.value = f"Asignaturas registradas: {len(cache_asignaturas)}"
 
-    # Carga sincrónica inicial
     cargar_datos_db()
 
     # =========================================================================

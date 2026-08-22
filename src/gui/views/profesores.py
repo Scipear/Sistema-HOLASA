@@ -1,14 +1,13 @@
 import re
 import flet as ft
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from src.database.connection import SessionLocal
 
-# Importación de los servicios asociados proporcionados
 from src.services.profesor_service import ProfesorService
 from src.services.profesor_asignatura_service import ProfesorAsignaturaService
 from src.services.sesion_profesor_service import SesionProfesorService
 
-# Servicios adicionales inferidos para resolver los nombres reales
 try:
     from src.services.curso_asignatura_service import CursoAsignaturaService
     from src.services.asignatura_service import AsignaturaService
@@ -43,7 +42,9 @@ class vista_profesores(ft.Container):
         # 2. Estado Local de la Vista (Caché en memoria)
         self.map_profesores = {}
         self.map_asignaturas = {}
-        self.map_sesiones = {}
+        self.map_asignaturas_detalladas = {}
+        self.sesiones_completas = {}
+        self.dias_sesiones = {}
         self.asignaturas_temp = []
         self.sesiones_temp = []
         self.profesor_actual_id = None
@@ -55,7 +56,6 @@ class vista_profesores(ft.Container):
     def _construir_controles_ui(self):
         """Define y estructura todos los controles visuales de la vista."""
         
-        # Estilos base
         estilo_input = {
             "border_color": "#303346", 
             "focused_border_color": "#439A5D", 
@@ -66,7 +66,7 @@ class vista_profesores(ft.Container):
             "content_padding": ft.padding.only(left=15, right=45, top=15, bottom=15)
         }
 
-        # Tabla Principal
+        # Tabla Principal simplificada con panel de detalle flotante
         self.tabla_profesores = ft.DataTable(
             expand=True,
             bgcolor="#13141C",
@@ -75,7 +75,8 @@ class vista_profesores(ft.Container):
             horizontal_lines=ft.border.BorderSide(1, "#303346"),
             vertical_lines=ft.border.BorderSide(0, ft.colors.TRANSPARENT),
             heading_row_color="#1A1C28",
-            data_row_max_height=95,
+            data_row_min_height=70,
+            data_row_max_height=80,
             columns=[
                 ft.DataColumn(ft.Text("Profesor", color=ft.colors.WHITE, weight=ft.FontWeight.BOLD)),
                 ft.DataColumn(ft.Text("Estado", color=ft.colors.WHITE, weight=ft.FontWeight.BOLD)),
@@ -85,7 +86,6 @@ class vista_profesores(ft.Container):
             rows=[]
         )
 
-        # Buscador y Totalizador
         self.txt_total = ft.Text("Profesores registrados: 0", color="#A0A0B0", size=14, weight=ft.FontWeight.W_500)
         self.txt_buscar = ft.TextField(
             hint_text="Búsqueda por nombre y/o apellido",
@@ -98,7 +98,6 @@ class vista_profesores(ft.Container):
             on_change=self.filtrar_profesores
         )
 
-        # Campos de Formulario
         self.txt_nombre = ft.TextField(label="Nombre", **estilo_input)
         self.txt_apellido = ft.TextField(label="Apellido", **estilo_input)
         self.dd_estado = ft.Dropdown(
@@ -107,19 +106,19 @@ class vista_profesores(ft.Container):
             **estilo_input
         )
         
-        # Selectores Relacionales
         self.dd_asig = ft.Dropdown(label="Selecciona asignatura y curso", **estilo_input)
-        self.dd_dia = ft.Dropdown(label="Día", **estilo_input)
-        self.dd_hora_inicio = ft.Dropdown(label="Hora Inicio", **estilo_input)
-        self.dd_hora_fin = ft.Dropdown(label="Hora Final", **estilo_input)
+        self.dd_dia = ft.Dropdown(label="Día", on_change=self.al_cambiar_dia, **estilo_input)
+        self.dd_sesion_inicio = ft.Dropdown(label="Sesión Inicial", on_change=self.al_cambiar_sesion_inicio, **estilo_input)
+        self.dd_sesion_fin = ft.Dropdown(label="Sesión Final", **estilo_input)
         
         self.lista_chips_asig = ft.Row(wrap=True, spacing=10)
         self.lista_chips_sesion = ft.Row(wrap=True, spacing=10)
 
-        # Modales
+        # Contenido dinámico para el panel flotante de detalles
+        self.contenido_panel_detalle = ft.Column([], spacing=12)
+
         self._construir_modales()
 
-        # Estructura Principal
         self.content = ft.Column(
             expand=True,
             controls=[
@@ -178,12 +177,33 @@ class vista_profesores(ft.Container):
             shape=ft.RoundedRectangleBorder(radius=15)
         )
 
+        # Panel Flotante / Diálogo para Ver Detalles con Tamaño Fijo y Scroll Interno
+        self.modal_detalle = ft.AlertDialog(
+            title=ft.Text("Detalle de Asignaciones", weight=ft.FontWeight.BOLD, color=ft.colors.WHITE),
+            bgcolor="#1E202D",
+            shape=ft.RoundedRectangleBorder(radius=15),
+            content=ft.Container(
+                width=520,
+                height=420,
+                padding=5,
+                content=ft.Column(
+                    [self.contenido_panel_detalle],
+                    scroll=ft.ScrollMode.AUTO,
+                    expand=True
+                )
+            ),
+            actions=[
+                ft.TextButton("Cerrar", on_click=lambda e: self.cerrar_modal(self.modal_detalle, e), style=ft.ButtonStyle(color="#A0A0B0"))
+            ],
+            actions_padding=15
+        )
+
         self.modal_formulario = ft.AlertDialog(
             title=ft.Text("Formulario de Profesor", weight=ft.FontWeight.BOLD, color=ft.colors.WHITE),
             bgcolor="#1E202D",
             shape=ft.RoundedRectangleBorder(radius=15),
             content=ft.Container(
-                width=760,
+                width=800,
                 content=ft.Column([
                     ft.Row([
                         ft.Container(content=self.txt_nombre, expand=True),
@@ -204,11 +224,11 @@ class vista_profesores(ft.Container):
                     
                     ft.Divider(color="#303346", height=10),
                     
-                    ft.Text("Disponibilidad Horaria Diaria", color=ft.colors.WHITE, weight=ft.FontWeight.BOLD, size=14),
+                    ft.Text("Disponibilidad Horaria (Bloques de Sesiones)", color=ft.colors.WHITE, weight=ft.FontWeight.BOLD, size=14),
                     ft.Row([
                         ft.Container(content=self.dd_dia, expand=2),
-                        ft.Container(content=self.dd_hora_inicio, expand=2),
-                        ft.Container(content=self.dd_hora_fin, expand=2),
+                        ft.Container(content=self.dd_sesion_inicio, expand=3),
+                        ft.Container(content=self.dd_sesion_fin, expand=3),
                         ft.Container(
                             content=ft.IconButton(ft.icons.ADD, on_click=self.agregar_sesion, icon_color=ft.colors.WHITE), 
                             bgcolor="#439A5D", border_radius=10, height=52, width=52, alignment=ft.alignment.center
@@ -224,9 +244,82 @@ class vista_profesores(ft.Container):
             actions_padding=20
         )
 
-    # =========================================================================
-    # UTILIDADES DE UI
-    # =========================================================================
+    def abrir_modal_detalle(self, prof_id, e):
+        """Abre el panel flotante con la información detallada del profesor seleccionado."""
+        p_data = self.map_profesores.get(prof_id)
+        if not p_data: 
+            return
+
+        self.contenido_panel_detalle.controls.clear()
+
+        # 1. Nombre del profesor
+        self.contenido_panel_detalle.controls.append(
+            ft.Row([
+                ft.Icon(ft.icons.PERSON, color="#5B9BD5", size=20),
+                ft.Text(f"{p_data['nombre']} {p_data['apellido']}", size=18, weight=ft.FontWeight.BOLD, color=ft.colors.WHITE)
+            ], spacing=8)
+        )
+        self.contenido_panel_detalle.controls.append(ft.Divider(color="#303346", height=5))
+
+        # 2. Subtítulo: Curso y Asignatura
+        self.contenido_panel_detalle.controls.append(
+            ft.Text("Curso y Asignatura", size=14, weight=ft.FontWeight.BOLD, color="#439A5D")
+        )
+
+        asig_ids = p_data["asignaturas"]
+        if asig_ids:
+            for a_id in asig_ids:
+                detalles = self.map_asignaturas_detalladas.get(a_id, {})
+                texto_formateado = detalles.get("texto_formateado") or self.map_asignaturas.get(a_id, f"Id:{a_id}")
+                
+                self.contenido_panel_detalle.controls.append(
+                    ft.Container(
+                        content=ft.Row([
+                            ft.Icon(ft.icons.BOOK, size=14, color="#439A5D"),
+                            ft.Text(texto_formateado, size=13, color=ft.colors.WHITE, weight=ft.FontWeight.W_500)
+                        ], spacing=8),
+                        bgcolor="#252836",
+                        padding=10,
+                        border_radius=8,
+                        border=ft.border.all(1, "#3A3E54")
+                    )
+                )
+        else:
+            self.contenido_panel_detalle.controls.append(
+                ft.Text("Sin cursos o asignaturas afiliadas.", size=12, color="#5A5D70")
+            )
+
+        self.contenido_panel_detalle.controls.append(ft.Divider(color="#303346", height=5))
+
+        # 3. Subtítulo: Horarios Disponibles
+        self.contenido_panel_detalle.controls.append(
+            ft.Text("Horarios Disponibles", size=14, weight=ft.FontWeight.BOLD, color="#F5B041")
+        )
+
+        bloques_disp = self.agrupar_sesiones_bloques(list(p_data["sesiones"]))
+        if bloques_disp:
+            for b in bloques_disp:
+                self.contenido_panel_detalle.controls.append(
+                    ft.Container(
+                        content=ft.Row([
+                            ft.Icon(ft.icons.SCHEDULE, size=14, color="#F5B041"),
+                            ft.Text(b['texto'], size=13, color="#F5B041", weight=ft.FontWeight.W_500)
+                        ], spacing=8),
+                        bgcolor="#3E352A",
+                        padding=10,
+                        border_radius=8,
+                        border=ft.border.all(1, "#594A34")
+                    )
+                )
+        else:
+            self.contenido_panel_detalle.controls.append(
+                ft.Text("Sin horarios disponibles registrados.", size=12, color="#5A5D70")
+            )
+
+        e.page.dialog = self.modal_detalle
+        self.modal_detalle.open = True
+        e.page.update()
+
     def mostrar_notificacion(self, e, mensaje: str, es_error: bool = False):
         snack = ft.SnackBar(
             content=ft.Text(mensaje, color=ft.colors.WHITE),
@@ -241,24 +334,92 @@ class vista_profesores(ft.Container):
         modal.open = False
         e.page.update()
 
-    def normalizar_hora(self, h_str):
-        if not h_str: return ""
+    def normalizar_y_minutos(self, h_str):
+        if not h_str: return "", 0
         try:
             partes = str(h_str).strip().split(":")
             if len(partes) >= 2:
                 hora = int(partes[0])
+                minutos = int(partes[1])
                 if 1 <= hora <= 6: hora += 12
-                return f"{hora:02d}:{int(partes[1]):02d}"
+                h_norm = f"{hora:02d}:{minutos:02d}"
+                t_min = (hora * 60) + minutos
+                return h_norm, t_min
         except: pass
-        return str(h_str).strip()
+        return str(h_str).strip(), 0
+    
+    def agrupar_sesiones_bloques(self, ses_ids):
+        dias_agrupados = {}
+        for s_id in ses_ids:
+            s_data = self.sesiones_completas.get(s_id)
+            if s_data:
+                dia = s_data['dia']
+                if dia not in dias_agrupados:
+                    dias_agrupados[dia] = []
+                dias_agrupados[dia].append(s_data)
 
-    # =========================================================================
-    # GESTIÓN DEL ESTADO LOCAL (CHIPS)
-    # =========================================================================
+        bloques = []
+        def orden_cronologico(d):
+            d_lower = d.lower().strip()
+            mapa = {"lu": 1, "ma": 2, "mi": 3, "ju": 4, "vi": 5, "sa": 6, "do": 7}
+            for clave, valor in mapa.items():
+                if d_lower.startswith(clave): return valor
+            return 99
+
+        for dia in sorted(dias_agrupados.keys(), key=orden_cronologico):
+            sesiones_dia = sorted(dias_agrupados[dia], key=lambda x: x['min_i'])
+            
+            if sesiones_dia:
+                primera = sesiones_dia[0]
+                ultima = sesiones_dia[-1]
+                ids_bloque = [s['id'] for s in sesiones_dia]
+                
+                if primera['id'] == ultima['id']:
+                    texto = f"{dia} {primera['h_i']} - {primera['h_f']}"
+                else:
+                    texto = f"{dia} {primera['h_i']} - {primera['h_f']} a {ultima['h_i']} - {ultima['h_f']}"
+                
+                bloques.append({"texto": texto, "ids": ids_bloque})
+                
+        return bloques
+
+    def al_cambiar_dia(self, e):
+        dia_sel = self.dd_dia.value
+        if not dia_sel: return
+        sesiones_del_dia = self.dias_sesiones.get(dia_sel, [])
+        self.dd_sesion_inicio.options = [
+            ft.dropdown.Option(key=str(s['id']), text=f"{s['h_i']} - {s['h_f']}") 
+            for s in sesiones_del_dia
+        ]
+        self.dd_sesion_fin.options = []
+        self.dd_sesion_inicio.value = None
+        self.dd_sesion_fin.value = None
+        e.page.update()
+
+    def al_cambiar_sesion_inicio(self, e):
+        dia_sel = self.dd_dia.value
+        id_ini = self.dd_sesion_inicio.value
+        if not dia_sel or not id_ini: return
+        
+        sesiones_del_dia = self.dias_sesiones.get(dia_sel, [])
+        min_inicio = 0
+        for s in sesiones_del_dia:
+            if str(s['id']) == id_ini:
+                min_inicio = s['min_i']
+                break
+        
+        self.dd_sesion_fin.options = [
+            ft.dropdown.Option(key=str(s['id']), text=f"{s['h_i']} - {s['h_f']}") 
+            for s in sesiones_del_dia if s['min_i'] >= min_inicio
+        ]
+        self.dd_sesion_fin.value = None
+        e.page.update()
+
     def refrescar_ui_asig(self):
         self.lista_chips_asig.controls.clear()
         for a_id in self.asignaturas_temp:
-            nombre = self.map_asignaturas.get(a_id, f"Id:{a_id}")
+            detalles = self.map_asignaturas_detalladas.get(a_id)
+            nombre = detalles["texto_formateado"] if detalles else self.map_asignaturas.get(a_id, f"Id:{a_id}")
             self.lista_chips_asig.controls.append(
                 ft.Chip(
                     label=ft.Text(nombre, size=11, color=ft.colors.WHITE),
@@ -269,12 +430,12 @@ class vista_profesores(ft.Container):
 
     def refrescar_ui_sesion(self):
         self.lista_chips_sesion.controls.clear()
-        for s_id in self.sesiones_temp:
-            nombre = self.map_sesiones.get(s_id, f"Id:{s_id}")
+        bloques = self.agrupar_sesiones_bloques(self.sesiones_temp)
+        for bloque in bloques:
             self.lista_chips_sesion.controls.append(
                 ft.Chip(
-                    label=ft.Text(nombre, size=11, color=ft.colors.WHITE),
-                    on_delete=lambda e, id_del=s_id: self.remover_sesion(id_del, e),
+                    label=ft.Text(bloque['texto'], size=11, color=ft.colors.WHITE),
+                    on_delete=lambda e, ids_del=bloque['ids']: self.remover_bloque_sesion(ids_del, e),
                     bgcolor="#2A2D3E"
                 )
             )
@@ -285,11 +446,12 @@ class vista_profesores(ft.Container):
             self.refrescar_ui_asig()
             e.page.update()
 
-    def remover_sesion(self, id_del, e):
-        if id_del in self.sesiones_temp:
-            self.sesiones_temp.remove(id_del)
-            self.refrescar_ui_sesion()
-            e.page.update()
+    def remover_bloque_sesion(self, ids_del, e):
+        for id_del in ids_del:
+            if id_del in self.sesiones_temp:
+                self.sesiones_temp.remove(id_del)
+        self.refrescar_ui_sesion()
+        e.page.update()
 
     def agregar_asig(self, e):
         if not self.dd_asig.value: return
@@ -303,33 +465,36 @@ class vista_profesores(ft.Container):
             self.mostrar_notificacion(e, "El curso/asignatura ya está asignado.", True)
 
     def agregar_sesion(self, e):
-        if not all([self.dd_dia.value, self.dd_hora_inicio.value, self.dd_hora_fin.value]):
-            self.mostrar_notificacion(e, "Complete día, hora de inicio y fin.", True)
+        dia_sel = self.dd_dia.value
+        id_ini = self.dd_sesion_inicio.value
+        id_fin = self.dd_sesion_fin.value
+
+        if not all([dia_sel, id_ini, id_fin]):
+            self.mostrar_notificacion(e, "Complete día, sesión inicial y sesión final.", True)
             return
+
+        sesiones_del_dia = self.dias_sesiones.get(dia_sel, [])
+        min_i_ini = next((s['min_i'] for s in sesiones_del_dia if str(s['id']) == id_ini), 0)
+        min_i_fin = next((s['min_i'] for s in sesiones_del_dia if str(s['id']) == id_fin), float('inf'))
+
+        agregadas = False
+        for s in sesiones_del_dia:
+            if min_i_ini <= s['min_i'] <= min_i_fin:
+                if s['id'] not in self.sesiones_temp:
+                    self.sesiones_temp.append(s['id'])
+                    agregadas = True
         
-        # Búsqueda in-memory para no consultar BD cada vez
-        sesion_encontrada = None
-        for s_id, texto_sesion in self.map_sesiones.items():
-            if (self.dd_dia.value.strip().lower() in texto_sesion.lower() and 
-                self.dd_hora_inicio.value.strip() in texto_sesion and 
-                self.dd_hora_fin.value.strip() in texto_sesion):
-                sesion_encontrada = s_id
-                break
-
-        if sesion_encontrada:
-            if sesion_encontrada not in self.sesiones_temp:
-                self.sesiones_temp.append(sesion_encontrada)
-                self.refrescar_ui_sesion()
-                self.dd_dia.value = self.dd_hora_inicio.value = self.dd_hora_fin.value = None
-                e.page.update()
-            else:
-                self.mostrar_notificacion(e, "Esta disponibilidad ya está agregada.", True)
+        if agregadas:
+            self.refrescar_ui_sesion()
+            self.dd_dia.value = None
+            self.dd_sesion_inicio.value = None
+            self.dd_sesion_fin.value = None
+            self.dd_sesion_inicio.options = []
+            self.dd_sesion_fin.options = []
+            e.page.update()
         else:
-            self.mostrar_notificacion(e, "No hay una sesión registrada en la base de datos con ese horario.", True)
+            self.mostrar_notificacion(e, "Las sesiones en este rango temporal ya están agregadas.", True)
 
-    # =========================================================================
-    # LÓGICA DE NEGOCIO (SERVICIOS Y EVENTOS)
-    # =========================================================================
     def abrir_modal_crear(self, e):
         self.profesor_actual_id = None
         self.txt_nombre.value = self.txt_apellido.value = ""
@@ -373,49 +538,50 @@ class vista_profesores(ft.Container):
         with SessionLocal() as db:
             try:
                 if not self.profesor_actual_id:
-                    # Crear
                     nuevo_prof = self.prof_service.crear(db, self.txt_nombre.value.strip(), self.txt_apellido.value.strip(), is_activo)
-                    for a_id in self.asignaturas_temp:
-                        self.prof_asig_service.asignar(db, nuevo_prof.id, a_id)
-                    for s_id in self.sesiones_temp:
-                        self.sesion_prof_service.asignar(db, s_id, nuevo_prof.id)
-                    self.mostrar_notificacion(e, "Profesor registrado exitosamente.")
+                    prof_id = nuevo_prof.id
                 else:
-                    # Actualizar
                     prof_id = self.profesor_actual_id
                     self.prof_service.actualizar(db, prof_id, self.txt_nombre.value.strip(), self.txt_apellido.value.strip(), is_activo)
 
-                    # Conciliación Curso-Asignaturas
-                    rels_asig = self.prof_asig_service.obtener_por_profesor(db, prof_id)
-                    map_actuales_asig = {rel.curso_asignatura_id: rel.id for rel in rels_asig}
+                rels_asig_existentes = self.prof_asig_service.obtener_por_profesor(db, prof_id)
+                ids_ya_asignados = {rel.curso_asignatura_id for rel in rels_asig_existentes}
+                map_rel_id_asig = {rel.curso_asignatura_id: rel.id for rel in rels_asig_existentes}
 
-                    for a_id in self.asignaturas_temp:
-                        if a_id not in map_actuales_asig:
+                for a_id in self.asignaturas_temp:
+                    if a_id not in ids_ya_asignados:
+                        try:
                             self.prof_asig_service.asignar(db, prof_id, a_id)
-                    for a_id, rel_id in map_actuales_asig.items():
-                        if a_id not in self.asignaturas_temp:
-                            self.prof_asig_service.desasignar(db, rel_id)
+                        except ValueError as ex:
+                            self.mostrar_notificacion(e, f"Aviso de Asignatura: {str(ex)}", es_error=True)
 
-                    # Conciliación Sesiones
-                    rels_ses = self.sesion_prof_service.obtener_por_profesor(db, prof_id)
-                    map_actuales_ses = {rel.sesion_id: rel.id for rel in rels_ses}
+                for a_id, rel_id in map_rel_id_asig.items():
+                    if a_id not in self.asignaturas_temp:
+                        self.prof_asig_service.desasignar(db, rel_id)
 
-                    for s_id in self.sesiones_temp:
-                        if s_id not in map_actuales_ses:
+                rels_ses_existentes = self.sesion_prof_service.obtener_por_profesor(db, prof_id)
+                ids_ses_asignadas = {rel.sesion_id for rel in rels_ses_existentes}
+                map_rel_id_ses = {rel.sesion_id: rel.id for rel in rels_ses_existentes}
+
+                for s_id in self.sesiones_temp:
+                    if s_id not in ids_ses_asignadas:
+                        try:
                             self.sesion_prof_service.asignar(db, s_id, prof_id)
-                    for s_id, rel_id in map_actuales_ses.items():
-                        if s_id not in self.sesiones_temp:
-                            self.sesion_prof_service.desasignar(db, rel_id)
+                        except ValueError as ex:
+                            self.mostrar_notificacion(e, f"Aviso de Sesión: {str(ex)}", es_error=True)
 
-                    self.mostrar_notificacion(e, "Profesor actualizado exitosamente.")
+                for s_id, rel_id in map_rel_id_ses.items():
+                    if s_id not in self.sesiones_temp:
+                        self.sesion_prof_service.desasignar(db, rel_id)
 
+                self.mostrar_notificacion(e, "Profesor guardado/actualizado exitosamente.")
                 self.cerrar_modal(self.modal_formulario, e)
                 self.cargar_datos(db)
                 self.txt_buscar.value = ""
                 e.page.update()
                 
             except Exception as ex:
-                self.mostrar_notificacion(e, str(ex), es_error=True)
+                self.mostrar_notificacion(e, f"Error general al procesar: {str(ex)}", es_error=True)
 
     def pedir_confirmacion_eliminar(self, prof_id, e):
         p_data = self.map_profesores.get(prof_id)
@@ -445,14 +611,10 @@ class vista_profesores(ft.Container):
 
     def filtrar_profesores(self, e):
         texto = self.txt_buscar.value.lower().strip() if self.txt_buscar.value else ""
-        # Filtrado in-memory sin tocar la base de datos
         for row in self.tabla_profesores.rows:
             row.visible = (texto in str(row.data)) if row.data else True
         e.page.update()
 
-    # =========================================================================
-    # CARGA DE DATOS Y RENDERIZADO BATCH
-    # =========================================================================
     def cargar_datos_iniciales(self):
         with SessionLocal() as db:
             self.cargar_datos(db)
@@ -462,67 +624,127 @@ class vista_profesores(ft.Container):
         try:
             self.map_profesores.clear()
             self.map_asignaturas.clear()
-            self.map_sesiones.clear()
+            self.map_asignaturas_detalladas.clear()
+            self.sesiones_completas.clear()
+            self.dias_sesiones.clear()
             
-            # Carga de Opciones: Cursos/Asignaturas
             if self.cur_asig_service and self.asig_service:
                 all_ca = self.cur_asig_service.obtener_todos(db)
                 opciones_ca = []
+
+                # Cargar mapa completo de menciones directamente de la base de datos (tablas 'mencion' o 'menciones')
+                map_menciones_db = {}
+                for tabla_mencion in ['mencion', 'menciones']:
+                    try:
+                        res_m = db.execute(text(f"SELECT id, nombre FROM {tabla_mencion}"))
+                        for row_m in res_m:
+                            map_menciones_db[row_m[0]] = row_m[1]
+                        if map_menciones_db:
+                            break
+                    except Exception:
+                        continue
+
                 for ca in all_ca:
                     asig_obj = self.asig_service.obtener_por_id(db, ca.asignatura_id)
-                    nombre = asig_obj.nombre if asig_obj else "Desconocida"
-                    curso = ""
+                    nombre_asig = asig_obj.nombre if asig_obj else "Desconocida"
+                    
+                    curso_str = ""
+                    mencion_str = ""
                     if self.curso_service:
                         cur_obj = self.curso_service.obtener_por_id(db, ca.curso_id)
                         if cur_obj:
-                            curso = f" ({getattr(cur_obj, 'year', '')} {getattr(cur_obj, 'seccion', '')})"
-                            # Extracción de mención vía getattr
-                            mencion_raw = getattr(cur_obj, 'mencion', None)
-                            if mencion_raw and hasattr(mencion_raw, 'nombre'):
-                                curso += f" [Mención: {mencion_raw.nombre}]"
+                            year = getattr(cur_obj, 'year', '') or getattr(cur_obj, 'anio', '') or getattr(cur_obj, 'grado', '')
+                            seccion = getattr(cur_obj, 'seccion', '') or getattr(cur_obj, 'grupo', '')
+                            
+                            # 1. Comprobación de foreign key 'mencion_id' en el curso
+                            mencion_id = getattr(cur_obj, 'mencion_id', None)
+                            if mencion_id and mencion_id in map_menciones_db:
+                                mencion_str = str(map_menciones_db[mencion_id]).strip()
+                            
+                            # 2. Comprobación directa y prioritaria del atributo/relación 'mencion'
+                            if not mencion_str:
+                                mencion_obj = getattr(cur_obj, 'mencion', None)
+                                if mencion_obj:
+                                    if hasattr(mencion_obj, 'nombre') and mencion_obj.nombre:
+                                        mencion_str = str(mencion_obj.nombre).strip()
+                                    elif isinstance(mencion_obj, str) and mencion_obj.strip():
+                                        mencion_str = mencion_obj.strip()
+                                    elif isinstance(mencion_obj, int) and mencion_obj in map_menciones_db:
+                                        mencion_str = str(map_menciones_db[mencion_obj]).strip()
+                            
+                            # 3. Búsqueda dinámica en posibles campos alternativos
+                            if not mencion_str:
+                                posibles_campos = ['especialidad', 'modalidad', 'area', 'carrera', 'mencion_nombre', 'nombre_mencion', 'especialidad_id']
+                                for campo in posibles_campos:
+                                    val = getattr(cur_obj, campo, None)
+                                    if val is not None:
+                                        if isinstance(val, int) and val in map_menciones_db:
+                                            mencion_str = str(map_menciones_db[val]).strip()
+                                            break
+                                        elif isinstance(val, str) and val.strip():
+                                            mencion_str = val.strip()
+                                            break
+                                        elif hasattr(val, 'nombre') and val.nombre:
+                                            mencion_str = str(val.nombre).strip()
+                                            break
+
+                            partes_curso = []
+                            info_base = f"{year} {seccion}".strip()
+                            if info_base:
+                                partes_curso.append(info_base)
+                            
+                            if mencion_str:
+                                if "mención" not in mencion_str.lower() and "mencion" not in mencion_str.lower():
+                                    mencion_formateada = f"Mención {mencion_str}"
+                                else:
+                                    mencion_formateada = mencion_str
+                                partes_curso.append(mencion_formateada)
+                            
+                            if partes_curso:
+                                curso_str = f"({', '.join(partes_curso)})"
                                 
-                    texto = f"{nombre}{curso}".strip()
-                    self.map_asignaturas[ca.id] = texto
-                    opciones_ca.append(ft.dropdown.Option(str(ca.id), texto))
+                    texto_formateado = f"{nombre_asig} {curso_str}".strip()
+                    
+                    self.map_asignaturas[ca.id] = texto_formateado
+                    self.map_asignaturas_detalladas[ca.id] = {
+                        "nombre_asig": nombre_asig,
+                        "curso_str": curso_str,
+                        "texto_formateado": texto_formateado
+                    }
+                    opciones_ca.append(ft.dropdown.Option(str(ca.id), texto_formateado))
+                
                 self.dd_asig.options = opciones_ca
 
-                # Carga de Opciones: Sesiones
             if self.sesion_service:
                 all_ses = self.sesion_service.obtener_todos(db)
-                opciones_dias, horas_ini, horas_fin = set(), set(), set()
-                
                 for s in all_ses:
-                    dia = str(getattr(s, 'dia', '')).strip()
-                    h_i = self.normalizar_hora(getattr(s, 'hora_inicio', ''))
-                    h_f = self.normalizar_hora(getattr(s, 'hora_fin', ''))
-                    texto_ses = f"{dia}: {h_i}-{h_f}"
-                    self.map_sesiones[s.id] = texto_ses
+                    dia = str(getattr(s, 'dia', '')).strip().capitalize()
+                    h_i, min_i = self.normalizar_y_minutos(getattr(s, 'hora_inicio', ''))
+                    h_f, min_f = self.normalizar_y_minutos(getattr(s, 'hora_fin', ''))
                     
-                    if dia: opciones_dias.add(dia)
-                    if h_i: horas_ini.add(h_i)
-                    if h_f: horas_fin.add(h_f)
-                
-                # --- NUEVA LÓGICA DE ORDENAMIENTO DE DÍAS ---
-                def orden_cronologico(d):
-                    d_lower = d.lower().strip()
-                    mapa_dias = {"lu": 1, "ma": 2, "mi": 3, "ju": 4, "vi": 5, "sa": 6, "do": 7}
-                    for clave, valor in mapa_dias.items():
-                        if d_lower.startswith(clave):
-                            return valor
-                    return 99 # Por si llega un dato anómalo
-                # --------------------------------------------
+                    s_data = {'id': s.id, 'dia': dia, 'h_i': h_i, 'h_f': h_f, 'min_i': min_i, 'min_f': min_f}
+                    self.sesiones_completas[s.id] = s_data
+                    
+                    if dia not in self.dias_sesiones:
+                        self.dias_sesiones[dia] = []
+                    self.dias_sesiones[dia].append(s_data)
 
-                # Aplicamos la función 'key' al ordenar los días
-                self.dd_dia.options = [ft.dropdown.Option(d) for d in sorted(list(opciones_dias), key=orden_cronologico)]
+                def orden_cronologico_dias(d):
+                    d_lower = d.lower().strip()
+                    mapa = {"lu": 1, "ma": 2, "mi": 3, "ju": 4, "vi": 5, "sa": 6, "do": 7}
+                    for clave, valor in mapa.items():
+                        if d_lower.startswith(clave): return valor
+                    return 99
+
+                for dia in self.dias_sesiones:
+                    self.dias_sesiones[dia].sort(key=lambda x: x['min_i'])
                 
-                self.dd_hora_inicio.options = [ft.dropdown.Option(h) for h in sorted(list(horas_ini))]
-                self.dd_hora_fin.options = [ft.dropdown.Option(h) for h in sorted(list(horas_fin))]
-            # Construcción Batch de Profesores
+                self.dd_dia.options = [ft.dropdown.Option(d) for d in sorted(self.dias_sesiones.keys(), key=orden_cronologico_dias)]
+
             profesores_db = self.prof_service.obtener_todos(db)
             rows_buffer = []
 
             for p in sorted(profesores_db, key=lambda x: f"{x.nombre} {x.apellido}".lower()):
-                # Cruce estricto por servicios (Capa correcta)
                 rels_asig = self.prof_asig_service.obtener_por_profesor(db, p.id)
                 rels_ses = self.sesion_prof_service.obtener_por_profesor(db, p.id)
                 
@@ -538,7 +760,6 @@ class vista_profesores(ft.Container):
                     "sesiones": ses_ids
                 }
 
-                # Construcción visual de la fila
                 nombre_comp = f"{p.nombre} {p.apellido}"
                 is_act = getattr(p, "estado", True)
                 
@@ -549,8 +770,18 @@ class vista_profesores(ft.Container):
                     padding=ft.padding.symmetric(horizontal=10, vertical=4), border_radius=12
                 )
 
-                str_asig = "Cursos: " + (", ".join([self.map_asignaturas.get(a, f"Id:{a}") for a in asig_ids]) if asig_ids else "Sin cursos")
-                str_disp = "Horarios: " + (" | ".join([self.map_sesiones.get(s, f"Id:{s}") for s in ses_ids]) if ses_ids else "Sin horarios")
+                btn_ver = ft.ElevatedButton(
+                    content=ft.Row([
+                        ft.Icon(ft.icons.VISIBILITY, size=16, color=ft.colors.WHITE),
+                        ft.Text("Ver", color=ft.colors.WHITE)
+                    ], spacing=6, tight=True),
+                    bgcolor="#2B4C7E",
+                    style=ft.ButtonStyle(
+                        shape=ft.RoundedRectangleBorder(radius=8),
+                        padding=ft.padding.symmetric(horizontal=12, vertical=8)
+                    ),
+                    on_click=lambda ex, id_p=p.id: self.abrir_modal_detalle(id_p, ex)
+                )
 
                 rows_buffer.append(
                     ft.DataRow(
@@ -558,10 +789,7 @@ class vista_profesores(ft.Container):
                         cells=[
                             ft.DataCell(ft.Row([ft.Icon(ft.icons.PERSON, color="#5B9BD5", size=18), ft.Text(nombre_comp, color=ft.colors.WHITE, weight=ft.FontWeight.W_500)], spacing=8)),
                             ft.DataCell(chip_estado),
-                            ft.DataCell(ft.Container(content=ft.Column([
-                                ft.Text(str_asig, size=11, color="#A0A0B0", max_lines=2, overflow=ft.TextOverflow.ELLIPSIS),
-                                ft.Text(str_disp, size=11, color="#F5B041", max_lines=2, overflow=ft.TextOverflow.ELLIPSIS)
-                            ], spacing=2), padding=ft.padding.symmetric(vertical=8), expand=True)),
+                            ft.DataCell(btn_ver),
                             ft.DataCell(ft.Row([
                                 ft.Container(content=ft.IconButton(ft.icons.EDIT, icon_color="#A0A0B0", icon_size=16, on_click=lambda ex, id_p=p.id: self.abrir_modal_editar(id_p, ex)), bgcolor="#2A2D3E", border_radius=8, width=32, height=32),
                                 ft.Container(content=ft.IconButton(ft.icons.DELETE, icon_color="#E57373", icon_size=16, on_click=lambda ex, id_p=p.id: self.pedir_confirmacion_eliminar(id_p, ex)), bgcolor="#3E2A2A", border_radius=8, width=32, height=32),
@@ -570,7 +798,6 @@ class vista_profesores(ft.Container):
                     )
                 )
 
-            # Inserción Batch (Única actualización)
             self.tabla_profesores.rows = rows_buffer
             self.txt_total.value = f"Profesores registrados: {len(profesores_db)}"
             

@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from src.database.connection import SessionLocal
 from src.services.mencion_service import MencionService
 
-# Instancia global del servicio (sin modificaciones)
+# Instancia global del servicio 
 mencion_service = MencionService()
 
 

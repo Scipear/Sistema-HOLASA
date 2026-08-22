@@ -36,7 +36,6 @@ def vista_cursos():
         "height": 45
     }
 
-    # Grilla centrada para que las tarjetas se alineen al medio
     grilla_cursos = ft.Row(
         wrap=True, 
         spacing=20, 
@@ -104,7 +103,6 @@ def vista_cursos():
         **estilo_input
     )
 
-    # Campos adicionales para crear una asignatura al vuelo
     txt_nombre_nueva_asig = ft.TextField(
         label="Nombre de la nueva asignatura",
         hint_text="Ej. Física, Química...",
@@ -124,7 +122,7 @@ def vista_cursos():
     dd_horas_asig = ft.Dropdown(
         label="Horas",
         options=[ft.dropdown.Option(str(h)) for h in range(1, 9)],
-        value="3",
+        value=None,
         border_color="#303346",
         focused_border_color="#439A5D",
         border_radius=10,
@@ -200,7 +198,11 @@ def vista_cursos():
             lista_chips_asig.update()
 
     def agregar_asignatura(e):
-        horas = int(dd_horas_asig.value or 3)
+        if not dd_horas_asig.value:
+            mostrar_notificacion(e.page, "Debe seleccionar la cantidad de horas para esta materia.", es_error=True)
+            return
+            
+        horas = int(dd_horas_asig.value)
         
         if dd_asignatura.value == "__nueva__":
             nombre_asig = txt_nombre_nueva_asig.value.strip() if txt_nombre_nueva_asig.value else ""
@@ -223,10 +225,6 @@ def vista_cursos():
                 "es_nueva": True
             })
             
-            txt_nombre_nueva_asig.value = ""
-            container_nueva_asig.visible = False
-            dd_asignatura.value = None
-            
         else:
             asig_id_str = dd_asignatura.value
             if not asig_id_str:
@@ -247,16 +245,22 @@ def vista_cursos():
                 "horas": horas,
                 "es_nueva": False
             })
-            dd_asignatura.value = None
 
+        dd_asignatura.value = None
+        txt_nombre_nueva_asig.value = ""
+        container_nueva_asig.visible = False
+        dd_horas_asig.value = None 
+        
         refrescar_chips_asig()
         
-        # Actualizamos individualmente en vez de recargar la vista entera
         dd_asignatura.update()
+        dd_horas_asig.update()
         container_nueva_asig.update()
         lista_chips_asig.update()
 
     def cerrar_modal_formulario(e):
+        asignaturas_temp.clear()
+        refrescar_chips_asig()
         modal_formulario.open = False
         e.page.update()
 
@@ -278,11 +282,15 @@ def vista_cursos():
                 mostrar_notificacion(e.page, "Debe ingresar el nombre de la nueva mención.", es_error=True)
                 return
 
+        # VALIDACIÓN: Exigir al menos una asignatura registrada
+        if not asignaturas_temp:
+            mostrar_notificacion(e.page, "Debe registrar al menos una asignatura para el curso.", es_error=True)
+            return
+
         id_form = str(id_actual.value).strip()
         year_form = str(dd_year.value).strip()
         seccion_form = str(dd_seccion.value).strip()
         
-        # Validación de duplicados en caché (Evita consultas innecesarias)
         if dd_mencion.value != "__nueva__":
             mencion_val = str(dd_mencion.value).strip()
             for c_id, c in map_cursos.items():
@@ -335,8 +343,15 @@ def vista_cursos():
 
                 if id_actual.value == "":
                     nuevo_curso = curso_service.crear(db, seccion=dd_seccion.value, year=dd_year.value, mencion_id=mencion_id)
+                    
+                    # Limpieza preventiva por si SQLite recicla un ID con datos huérfanos previos
+                    rels_antiguas = curso_asig_service.obtener_por_curso(db, nuevo_curso.id)
+                    for rel in rels_antiguas:
+                        curso_asig_service.eliminar(db, rel.id)
+
                     for asig in asignaturas_procesadas:
                         curso_asig_service.crear(db, curso_id=nuevo_curso.id, asignatura_id=asig["asignatura_id"], horas_semanales=asig["horas"])
+                    
                     mostrar_notificacion(e.page, "Curso registrado exitosamente.")
                 else:
                     curso_id = int(id_actual.value)
@@ -355,8 +370,10 @@ def vista_cursos():
                             curso_asig_service.actualizar(db, ids_actuales_asig[asig_id].id, horas_semanales=asig["horas"])
                         else:
                             curso_asig_service.crear(db, curso_id=curso_id, asignatura_id=asig_id, horas_semanales=asig["horas"])
+                    
                     mostrar_notificacion(e.page, "Curso actualizado exitosamente.")
 
+                asignaturas_temp.clear()
                 cargar_datos(e.page)
                 
             except ValueError as ve:
@@ -477,7 +494,6 @@ def vista_cursos():
         txt_total.value = str(cursos_visibles)
         txt_total_asig.value = str(total_asig)
         
-        # Evitar page.update() si es render inicial
         if e and e.page:
             grilla_cursos.update()
             txt_total.update()
@@ -558,6 +574,9 @@ def vista_cursos():
     )
 
     def abrir_modal_crear(e):
+        asignaturas_temp.clear()
+        refrescar_chips_asig()
+        
         id_actual.value = ""
         dd_year.value = "1ro"
         dd_seccion.value = "A"
@@ -569,15 +588,15 @@ def vista_cursos():
         if dd_tipo_nueva_asig.options:
             dd_tipo_nueva_asig.value = dd_tipo_nueva_asig.options[0].key
         container_nueva_asig.visible = False
-        dd_horas_asig.value = "3"
-        asignaturas_temp.clear()
-        refrescar_chips_asig()
+        dd_horas_asig.value = None
         
         e.page.dialog = modal_formulario
         modal_formulario.open = True
         e.page.update()
 
     def abrir_modal_editar(cur_id, e):
+        asignaturas_temp.clear()
+        
         cur_dict = map_cursos.get(cur_id)
         if not cur_dict:
             return
@@ -598,9 +617,9 @@ def vista_cursos():
         if dd_tipo_nueva_asig.options:
             dd_tipo_nueva_asig.value = dd_tipo_nueva_asig.options[0].key
         container_nueva_asig.visible = False
-        dd_horas_asig.value = "3"
+        
+        dd_horas_asig.value = None
 
-        asignaturas_temp.clear()
         for asig_data in cur_dict.get("asignaturas", []):
             asignaturas_temp.append({
                 "id": asig_data["asignatura_id"],
@@ -610,6 +629,7 @@ def vista_cursos():
                 "horas": asig_data["horas"],
                 "es_nueva": False
             })
+        
         refrescar_chips_asig()
         
         e.page.dialog = modal_formulario
@@ -637,7 +657,6 @@ def vista_cursos():
                 asignaturas_db = asig_service.obtener_todos(db)
                 map_asignaturas.clear()
                 
-                # Recolectar únicamente los tipos únicos existentes en la base de datos
                 tipos_unicos = set()
                 for a in asignaturas_db:
                     tipo_val = getattr(a, "tipo", None)
@@ -649,7 +668,6 @@ def vista_cursos():
                         "tipo": tipo_val or ""
                     }
 
-                # Llenar opciones del dropdown de tipos de asignatura
                 dd_tipo_nueva_asig.options = [ft.dropdown.Option(t) for t in sorted(tipos_unicos)]
                 if dd_tipo_nueva_asig.options:
                     dd_tipo_nueva_asig.value = dd_tipo_nueva_asig.options[0].key

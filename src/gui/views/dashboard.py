@@ -26,10 +26,10 @@ def vista_dashboard(on_navigate=None):
   # Obtener los totales reales desde la base de datos utilizando los servicios de negocio
   db = SessionLocal()
   try:
-    total_profesores = ProfesorService().contar(db)  #[cite: 8]
-    total_cursos = CursoService().contar(db)  #[cite: 10]
-    total_asignaturas = AsignaturaService().contar(db)  #[cite: 9]
-    total_salones = SalonService().contar(db)  #[cite: 11]
+    total_profesores = ProfesorService().contar(db)  
+    total_cursos = CursoService().contar(db)  
+    total_asignaturas = AsignaturaService().contar(db)  
+    total_salones = SalonService().contar(db)  
   except Exception:
     total_profesores = 0
     total_cursos = 0
@@ -38,7 +38,7 @@ def vista_dashboard(on_navigate=None):
   finally:
     db.close()
 
-  # Obtener el año académico actual de forma dinámica según el periodo escolar en Venezuela
+  # Obtener el año académico actual de forma dinámica según el periodo escolar 
   anio_academico_actual = obtener_anio_academico()
 
   estilo_tarjeta_oscura = {
@@ -302,24 +302,6 @@ def vista_dashboard(on_navigate=None):
               ),
           ], spacing=10),
           ft.Divider(color="#303346", height=8),
-          ft.Row([
-              ft.Container(
-                  content=ft.Text(
-                      "2 Docentes con Prioridad", color="#E69138", size=11
-                  ),
-                  bgcolor="#332415",
-                  padding=8,
-                  border_radius=8,
-              ),
-              ft.Container(
-                  content=ft.Text(
-                      "5 Menciones activas", color="#76C7C0", size=11
-                  ),
-                  bgcolor="#1A3A38",
-                  padding=8,
-                  border_radius=8,
-              ),
-          ], spacing=8, wrap=True),
       ], spacing=10),
   )
 
@@ -350,6 +332,7 @@ def vista_dashboard(on_navigate=None):
           ]),
           ft.Divider(color="#303346", height=8),
           fila_info("Período:", anio_academico_actual),
+          #Estatico
           fila_info("Generado el:", "15/06/2024"),
           fila_info("Cursos cubiertos:", "7 de 7"),
           fila_info("Conflictos:", "0"),

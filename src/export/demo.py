@@ -4,6 +4,10 @@ Uso:
     python src/export/demo.py                # horario rápido generado al vuelo
     python src/export/demo.py --genetics     # usa el pipeline real de src.engine.genetics
     python src/export/demo.py --generations 200 --output-dir data/export
+
+Por defecto exporta los PDFs por año/curso y también el horario individual de cada
+profesor (Horario_Prof_*.pdf), siempre sobre el mismo horario generado.
+Usa --no-profesores para exportar solo los horarios por año/curso.
 """
 import argparse
 
@@ -22,7 +26,17 @@ def main() -> None:
                         help="Usar el pipeline real de src.engine.genetics")
     parser.add_argument("--generations", type=int, default=2000,
                         help="Generaciones a ejecutar si se usa --genetics")
+    parser.add_argument("--profesores", action=argparse.BooleanOptionalAction, default=True,
+                        help="Exporta también el horario de cada profesor (default: activado; "
+                             "usa --no-profesores para desactivar)")
     args = parser.parse_args()
+
+    extra_exporter = None
+    if args.profesores:
+        from src.export.teacher_pdf_exporter import export_all_teachers
+
+        def extra_exporter(timetable, output_dir, year_label):
+            return export_all_teachers(timetable, output_dir, year_label=year_label)
 
     if args.genetics:
         from src.export.pdf_exporter import export_from_genetics
@@ -31,6 +45,7 @@ def main() -> None:
             args.output_dir,
             year_label=args.year_label,
             generations=args.generations,
+            extra_exporter=extra_exporter,
         )
     else:
         from src.export.pdf_exporter import export_all
@@ -39,6 +54,9 @@ def main() -> None:
         events = genetics.create_events()
         timetable = genetics.create_timetable(events)
         created = export_all(timetable, args.output_dir, year_label=args.year_label)
+
+        if extra_exporter is not None:
+            created += extra_exporter(timetable, args.output_dir, args.year_label)
 
     _print_created(created)
 

@@ -103,6 +103,7 @@ def _build_data_maps(data: Data) -> dict:
         menciones = {m.id: m.nombre for m in MencionRepository().get_all(db)}
         salon_curso_repo = SalonCursoRepository()
         salon_repo = SalonRepository()
+        room_names = {s.id: s.nombre for s in salon_repo.get_all(db)}
 
         group_info = {}
         for curso in CursoRepository().get_all(db):
@@ -124,6 +125,7 @@ def _build_data_maps(data: Data) -> dict:
         "group_info": group_info,
         "subject_names": {s.id: s.name for s in data.subjects},
         "teacher_names": {t.id: f"{t.name} {t.last_name}".strip() for t in data.teachers},
+        "room_names": room_names,
     }
 
 
@@ -380,12 +382,15 @@ def export_from_genetics(
     year_label: str = "2025 - 2026",
     generations: int = 2000,
     population_size: int = 50,
+    extra_exporter=None,
 ) -> list[str]:
     """Reproduce el pipeline de src.engine.genetics y exporta el mejor horario.
 
     Es la función de prueba para exportar horarios generados por el motor
     (equivalentes a los de `python -m src.engine.genetics`). No modifica nada
     de la genética: solo importa sus funciones y captura el best_timetable.
+    Si se pasa extra_exporter, se invoca con (timetable, output_dir, year_label)
+    para exportaciones adicionales sobre el mismo horario.
     """
     from src.engine import genetics
 
@@ -405,7 +410,10 @@ def export_from_genetics(
 
     best_timetable = selected[0][1]
     print("\nExportando horario generado por el motor de genética...")
-    return export_all(best_timetable, output_dir, year_label)
+    created = export_all(best_timetable, output_dir, year_label)
+    if extra_exporter is not None:
+        created += extra_exporter(best_timetable, output_dir, year_label)
+    return created
 
 
 _title_style = ParagraphStyle(

@@ -1057,33 +1057,6 @@ def print_population(population: list[list[Event]]):
         #     print("  [... Otros horarios ocultos ...]")
         #     break
 
-def print_collisions_report(collisions: list):
-    if not collisions:
-        print("\n" + "="*50)
-        print(" 🎉 ¡EXCELENTE! No se encontraron choques de profesores. 🎉")
-        print("="*50 + "\n")
-        return
-
-    days_names = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"]
-
-    print("\n" + "!"*60)
-    print(f"       REPORTE DETALLADO DE CHOQUES ({len(collisions)} detectados)")
-    print("!"*60)
-
-    # Agrupamos o iteramos para mostrarlo visualmente limpio
-    for i, c in enumerate(collisions, 1):
-        # Calcular el día (0 a 4) y la hora dentro de ese día (1 a 10)
-        day_index = (c["block"] - 1) // 10
-        hour_in_day = ((c["block"] - 1) % 10) + 1
-        
-        day_name = days_names[day_index] if day_index < len(days_names) else f"Día {day_index}"
-
-        print(f"\n💥 CHOQUE #{i} | Profesor ID: {c['teacher_id']} | {day_name} - Hora Bloque: {hour_in_day} (Global: {c['block']})")
-        print(f"  └─ Clase A: Evento ID {c['event_1']['id']} | Materia ID: {c['event_1']['subject']} | Grupo ID: {c['event_1']['group']}")
-        print(f"  └─ Clase B: Evento ID {c['event_2']['id']} | Materia ID: {c['event_2']['subject']} | Grupo ID: {c['event_2']['group']}")
-    
-    print("\n" + "="*60 + "\n")
-
 def evaluate_and_report(best_individual: list[Event]):
     """
     Ejecuta las funciones en el mejor individuo al final de las generaciones

@@ -6,10 +6,11 @@ import os
 try:
     from src.engine import genetics
     from src.export.pdf_exporter import export_all
+    from src.export.teacher_pdf_exporter import export_all_teachers
 except ImportError:
-    # Manejo de fallback en caso de ejecuciones aisladas
     genetics = None
     export_all = None
+    export_all_teachers = None
 
 
 def vista_generacion():
@@ -20,11 +21,13 @@ def vista_generacion():
         "border": ft.border.all(1, "#303346")
     }
 
-    # Estado de la vista y almacenamiento del resultado
+    # Estado de la vista
     estado_ref = {
         "generado": False, 
         "en_progreso": False,
-        "best_timetable": None
+        "exportando": False,
+        "best_timetable": None,
+        "final_report": None
     }
 
     progreso_bar = ft.ProgressBar(
@@ -32,19 +35,22 @@ def vista_generacion():
     )
     txt_progreso = ft.Text("", color="#A0A0B0", size=12, visible=False)
 
-    # Panel informativo simplificado (sin la grilla de previsualización)
-    panel_info_estado = ft.Container(
-        expand=True,
-        content=ft.Column([
+    def crear_panel_inicial():
+        return ft.Column([
             ft.Icon(ft.icons.AUTO_AWESOME, size=60, color="#303346"),
             ft.Text("Generación de Horarios", size=20, color="#FFFFFF", weight=ft.FontWeight.BOLD),
             ft.Text(
-                "Presiona 'Generar Horario' para ejecutar el algoritmo genético y exportar los archivos PDF correspondientes.",
+                "Presiona 'Generar Horario' para ejecutar el algoritmo genético. "
+                "Al finalizar podrás revisar la auditoría de choques antes de exportar a PDF.",
                 size=13, color="#A0A0B0", text_align=ft.TextAlign.CENTER
             ),
         ], horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-           alignment=ft.MainAxisAlignment.CENTER, spacing=12),
-        alignment=ft.alignment.center
+           alignment=ft.MainAxisAlignment.CENTER, spacing=12)
+
+    panel_info_container = ft.Container(
+        **estilo_tarjeta_oscura,
+        expand=True,
+        content=crear_panel_inicial()
     )
 
     btn_generar = ft.ElevatedButton(
@@ -82,7 +88,6 @@ def vista_generacion():
         border=ft.border.all(1, "#439A5D")
     )
 
-    # Componentes visuales de configuración
     sw_priorizar_prof = ft.Switch(value=True, active_color="#439A5D")
     sw_priorizar_elec = ft.Switch(value=False, active_color="#439A5D")
     sw_min_vacios = ft.Switch(value=True, active_color="#439A5D")
@@ -101,6 +106,369 @@ def vista_generacion():
             ft.Text(etiqueta, color=ft.colors.WHITE, size=13, expand=True), sw
         ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
 
+    def resetear_vista(page):
+        estado_ref["generado"] = False
+        estado_ref["en_progreso"] = False
+        estado_ref["best_timetable"] = None
+        estado_ref["final_report"] = None
+
+        panel_info_container.content = crear_panel_inicial()
+        badge_estado.visible = False
+        btn_generar.visible = True
+        btn_generar.disabled = False
+        btn_regenerar.visible = False
+        btn_exportar.visible = False
+        progreso_bar.visible = False
+        txt_progreso.visible = False
+        page.update()
+
+    def ejecutar_exportacion(page, button_triggered=None):
+        if estado_ref.get("exportando"):
+            return
+        
+        estado_ref["exportando"] = True
+
+        if button_triggered:
+            button_triggered.disabled = True
+            button_triggered.text = "Exportando PDF..."
+        btn_exportar.disabled = True
+        btn_exportar.text = "Exportando PDF..."
+        page.update()
+
+        try:
+            best_timetable = estado_ref.get("best_timetable")
+            if best_timetable is not None:
+                if export_all is not None:
+                    export_all(
+                        timetable=best_timetable,
+                        output_dir="data/export",
+                        year_label=dd_anio.value
+                    )
+
+                if export_all_teachers is not None:
+                    export_all_teachers(
+                        timetable=best_timetable,
+                        output_dir="data/export",
+                        year_label=dd_anio.value
+                    )
+
+            badge_estado.visible = True
+            
+            page.snack_bar = ft.SnackBar(
+                ft.Row([
+                    ft.Icon(ft.icons.CHECK_CIRCLE, color="#439A5D"),
+                    ft.Text("Horarios exportados exitosamente en 'data/export'", color=ft.colors.WHITE)
+                ]),
+                bgcolor="#1A2A20"
+            )
+            page.snack_bar.open = True
+        finally:
+            estado_ref["exportando"] = False
+            
+            if button_triggered:
+                button_triggered.text = "Exportado Exitosamente"
+                button_triggered.icon = ft.icons.CHECK_CIRCLE
+                button_triggered.bgcolor = "#1A3A2A"
+                button_triggered.disabled = True
+
+            btn_exportar.disabled = False
+            btn_exportar.text = "Exportar Horarios"
+            btn_exportar.visible = True
+            btn_regenerar.visible = True
+            btn_regenerar.disabled = False
+            
+            page.update()
+
+    # -------------------------------------------------------------
+    # FUNCIONES DE FORMATEO CONECTADAS A ESTRUCTURAS DE GENETICS
+    # -------------------------------------------------------------
+    def fmt_bloque(block_val):
+        if block_val is None:
+            return "Bloque N/A"
+        try:
+            b_int = int(block_val)
+        except (ValueError, TypeError):
+            return str(block_val)
+
+        # 1. Buscar en la lista academic_hours de genetics
+        if genetics and hasattr(genetics, 'academic_hours') and genetics.academic_hours:
+            for ah in genetics.academic_hours:
+                if getattr(ah, 'index', None) == b_int or getattr(ah, 'db_id', None) == b_int:
+                    return f"{ah.start_hour} a {ah.end_hour}"
+            if 0 <= b_int < len(genetics.academic_hours):
+                ah = genetics.academic_hours[b_int]
+                return f"{ah.start_hour} a {ah.end_hour}"
+
+        # 2. Fallback por cálculo predeterminado
+        bloques_hora = [
+            "7:00 a 7:40", "7:40 a 8:20", "8:20 a 9:00", 
+            "9:00 a 9:40", "9:40 a 10:20", "10:20 a 11:00", 
+            "11:00 a 11:40", "11:40 a 12:20", "12:20 a 1:00"
+        ]
+        return bloques_hora[b_int % len(bloques_hora)]
+
+    def fmt_profesor(teacher_ref):
+        if teacher_ref is None:
+            return "Sin Profesor"
+        
+        # Si viene el objeto Teacher directamente
+        if hasattr(teacher_ref, 'name'):
+            lname = getattr(teacher_ref, 'last_name', '')
+            return f"{teacher_ref.name} {lname}".strip()
+        
+        if isinstance(teacher_ref, dict):
+            return teacher_ref.get('name') or teacher_ref.get('nombre') or f"Profesor {teacher_ref.get('id', '')}"
+        
+        try:
+            t_id = int(teacher_ref)
+        except (ValueError, TypeError):
+            return str(teacher_ref)
+
+        # Buscar en TEACHERS_BY_ID de genetics
+        if genetics and hasattr(genetics, 'TEACHERS_BY_ID') and t_id in genetics.TEACHERS_BY_ID:
+            t = genetics.TEACHERS_BY_ID[t_id]
+            return f"{t.name} {t.last_name}".strip()
+        
+        if genetics and hasattr(genetics, 'teachers') and genetics.teachers:
+            for t in genetics.teachers:
+                if getattr(t, 'id', None) == t_id:
+                    return f"{t.name} {t.last_name}".strip()
+
+        return f"Profesor #{t_id}"
+
+    def fmt_grupo_nombre(group_ref):
+        if group_ref is None:
+            return "Sin Grupo"
+
+        if hasattr(group_ref, 'name'):
+            return group_ref.name
+
+        if isinstance(group_ref, dict):
+            return group_ref.get('name') or group_ref.get('nombre') or f"Grupo {group_ref.get('id', '')}"
+
+        try:
+            g_id = int(group_ref)
+        except (ValueError, TypeError):
+            return str(group_ref)
+
+        # Buscar en GROUPS_BY_ID de genetics
+        if genetics and hasattr(genetics, 'GROUPS_BY_ID') and g_id in genetics.GROUPS_BY_ID:
+            g = genetics.GROUPS_BY_ID[g_id]
+            return g.name
+
+        if genetics and hasattr(genetics, 'groups') and genetics.groups:
+            for g in genetics.groups:
+                if getattr(g, 'id', None) == g_id:
+                    return g.name
+
+        return f"Grupo #{g_id}"
+
+    def fmt_aula_nombre(room_ref):
+        if room_ref is None:
+            return "Sin Aula"
+
+        if hasattr(room_ref, 'name'):
+            return room_ref.name
+
+        if isinstance(room_ref, dict):
+            return room_ref.get('name') or room_ref.get('nombre') or f"Aula {room_ref.get('id', '')}"
+
+        try:
+            r_id = int(room_ref)
+        except (ValueError, TypeError):
+            return str(room_ref)
+
+        # Buscar en rooms de genetics
+        if genetics and hasattr(genetics, 'rooms') and genetics.rooms:
+            for r in genetics.rooms:
+                if getattr(r, 'id', None) == r_id:
+                    return r.name
+
+        return f"Aula #{r_id}"
+
+    def fmt_materia_nombre(subject_ref):
+        if subject_ref is None:
+            return "Materia N/A"
+
+        if hasattr(subject_ref, 'name'):
+            return subject_ref.name
+
+        if isinstance(subject_ref, dict):
+            return subject_ref.get('name') or subject_ref.get('subject_name') or f"Materia #{subject_ref.get('id', '')}"
+
+        try:
+            s_id = int(subject_ref)
+        except (ValueError, TypeError):
+            return str(subject_ref)
+
+        # Buscar en SUBJECTS_BY_ID de genetics
+        if genetics and hasattr(genetics, 'SUBJECTS_BY_ID') and s_id in genetics.SUBJECTS_BY_ID:
+            s = genetics.SUBJECTS_BY_ID[s_id]
+            return s.name
+
+        if genetics and hasattr(genetics, 'subjects') and genetics.subjects:
+            for s in genetics.subjects:
+                if getattr(s, 'id', None) == s_id:
+                    return s.name
+
+        return f"Materia #{s_id}"
+
+    def fmt_evento(e):
+        if not e:
+            return "Evento N/A"
+
+        subj_ref = None
+        group_ref = None
+
+        if isinstance(e, dict):
+            subj_ref = e.get('subject') or e.get('subject_id') or e.get('subject_name')
+            group_ref = e.get('group') or e.get('group_id')
+        elif hasattr(e, 'subject'):
+            subj_ref = e.subject
+            group_ref = getattr(e, 'group', None)
+        else:
+            subj_ref = e
+
+        materia = fmt_materia_nombre(subj_ref)
+        
+        if group_ref is not None:
+            grp_nombre = fmt_grupo_nombre(group_ref)
+            return f"'{materia}' ({grp_nombre})"
+        return f"'{materia}'"
+
+    # -------------------------------------------------------------
+    # CONSTRUCCIÓN DEL PANEL DE REPORTE DE CHOQUES (AUDITORÍA)
+    # -------------------------------------------------------------
+    def construir_vista_reporte(report, page):
+        dias_semana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"]
+        total_fitness = report.get("total_fitness", 0)
+
+        color_fitness = "#439A5D" if total_fitness < 8000 else "#FF6B6B"
+        
+        items_reporte = [
+            ft.Row([
+                ft.Column([
+                    ft.Text("Reporte de calidad del horario", size=18, weight=ft.FontWeight.BOLD, color=ft.colors.WHITE),
+                    ft.Text(f"Puntaje de Horario Final: {total_fitness}", size=13, color=color_fitness, weight=ft.FontWeight.BOLD)
+                ]),
+            ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+            ft.Divider(color="#303346", height=12)
+        ]
+
+        def helper_seccion(titulo, lista, fn_formato, icono=ft.icons.WARNING_AMBER_ROUNDED):
+            cant = len(lista)
+            if cant == 0:
+                return ft.Container(
+                    bgcolor="#1A2A20", border_radius=8, padding=10,
+                    content=ft.Row([
+                        ft.Icon(ft.icons.CHECK_CIRCLE_OUTLINE, color="#439A5D", size=16),
+                        ft.Text(f"{titulo}: Sin conflictos detectados", color="#439A5D", size=12, weight=ft.FontWeight.BOLD)
+                    ])
+                )
+            
+            filas = [
+                ft.Row([
+                    ft.Icon(icono, color="#FF6B6B", size=16),
+                    ft.Text(f"{titulo} ({cant}):", color="#FF6B6B", size=13, weight=ft.FontWeight.BOLD)
+                ])
+            ]
+            for elem in lista:
+                filas.append(
+                    ft.Text(f"  • {fn_formato(elem)}", color="#D0D0E0", size=11)
+                )
+            return ft.Container(
+                bgcolor="#2A1C1C", border_radius=8, padding=10,
+                content=ft.Column(filas, spacing=4),
+                border=ft.border.all(1, "#5A2A2A")
+            )
+
+        # 1. Choques de Grupos
+        def fmt_grupo(f):
+            e1 = f.get('event_1', {})
+            e2 = f.get('event_2', {})
+            grp = fmt_grupo_nombre(f.get('group', ''))
+            blk = fmt_bloque(f.get('block', ''))
+            return f"La seccion {grp} tiene un choque entre la asignatura {fmt_evento(e1)} y {fmt_evento(e2)} en el bloque {blk}."
+
+        items_reporte.append(helper_seccion("Choques de Grupos", report.get("group_collisions", []), fmt_grupo))
+
+        # 2. Choques de Profesores
+        def fmt_prof(f):
+            e1 = f.get('event_1', {})
+            e2 = f.get('event_2', {})
+            prof = fmt_profesor(f.get('teacher_name') or f.get('teacher_id') or f.get('teacher', ''))
+            blk = fmt_bloque(f.get('block', ''))
+            return f"El profesor {prof} tiene un conflicto entre {fmt_evento(e1)} y {fmt_evento(e2)} en el bloque {blk}"
+
+        items_reporte.append(helper_seccion("Choques de Profesores", report.get("teacher_collisions", []), fmt_prof))
+
+        # 3. Choques de Aulas
+        def fmt_aula(f):
+            e1 = f.get('event_1', {})
+            e2 = f.get('event_2', {})
+            aula = fmt_aula_nombre(f.get('room_name') or f.get('room_id') or f.get('room', ''))
+            blk = fmt_bloque(f.get('block', ''))
+            return f"Las asignaturas {fmt_evento(e1)} y {fmt_evento(e2)} tienen un conflicto en el {aula} en el bloque {blk}."
+
+        items_reporte.append(helper_seccion("Choques de Aulas", report.get("room_collisions", []), fmt_aula))
+
+        # 4. Baches y Ventanas Horarias
+        def fmt_gap(f):
+            day_idx = f.get('day', 0)
+            dia_str = dias_semana[day_idx] if isinstance(day_idx, int) and 0 <= day_idx < len(dias_semana) else str(day_idx)
+            grp = fmt_grupo_nombre(f.get('group', ''))
+            tipo = f.get('type', 'Hueco intermedio')
+            
+            if 'gaps_count' in f:
+                detalle = f"tiene {f.get('gaps_count')} horas libres en los bloques: {f.get('hours', [])}"
+            elif 'hours_count' in f:
+                detalle = f"tiene una carga horaria de {f.get('hours_count')} horas"
+            elif 'first_hour' in f:
+                detalle = f"tiene entrada tardia a las {fmt_bloque(f.get('first_hour'))}"
+            else:
+                detalle = ""
+            return f"La seccion {grp} {detalle} el dia {dia_str}.".strip()
+
+        items_reporte.append(helper_seccion("Baches y Ventanas Horarias", report.get("gaps", []), fmt_gap, ft.icons.SCHEDULE_ROUNDED))
+
+        # 5. Materias Repetidas el Mismo Día
+        def fmt_rep(f):
+            day_idx = f.get('day', 0)
+            dia_str = dias_semana[day_idx] if isinstance(day_idx, int) and 0 <= day_idx < len(dias_semana) else str(day_idx)
+            grp = fmt_grupo_nombre(f.get('group', ''))
+            materia = fmt_materia_nombre(f.get('subject') or f.get('subject_name'))
+            return f"La materia {materia} se dicta de forma repetida los dias {dia_str} para la seccion {grp}."
+
+        items_reporte.append(helper_seccion("Materias Repetidas el Mismo Día", report.get("subject_duplications", []), fmt_rep, ft.icons.REPEAT_ROUNDED))
+
+        btn_si_exportar = ft.ElevatedButton(
+            "Sí, Exportar a PDF",
+            icon=ft.icons.PICTURE_AS_PDF_ROUNDED,
+            bgcolor="#439A5D", color=ft.colors.WHITE, height=42
+        )
+        btn_si_exportar.on_click = lambda e: ejecutar_exportacion(page, button_triggered=e.control)
+
+        btn_no_descartar = ft.OutlinedButton(
+            "No, Descartar",
+            icon=ft.icons.CLOSE_ROUNDED,
+            style=ft.ButtonStyle(color="#A0A0B0", side=ft.BorderSide(1, "#303346")), height=42,
+            on_click=lambda _: resetear_vista(page)
+        )
+
+        bloque_decision = ft.Container(
+            bgcolor="#13141C", border_radius=10, padding=15,
+            border=ft.border.all(1, "#303346"),
+            content=ft.Column([
+                ft.Text("¿Desea exportar este horario a PDF?", size=14, weight=ft.FontWeight.BOLD, color=ft.colors.WHITE),
+                ft.Row([btn_si_exportar, btn_no_descartar], spacing=10)
+            ], spacing=10)
+        )
+
+        items_reporte.append(ft.Divider(color="#303346", height=8))
+        items_reporte.append(bloque_decision)
+
+        return ft.Column(items_reporte, scroll=ft.ScrollMode.AUTO, expand=True, spacing=10)
+
     # -------------------------------------------------------------
     # EJECUCIÓN DEL ALGORITMO GENÉTICO EN SEGUNDO PLANO
     # -------------------------------------------------------------
@@ -113,7 +481,6 @@ def vista_generacion():
             page.update()
             return
 
-        # 1. Inicialización de eventos y población
         events = genetics.create_events()
         population = genetics.create_population(50, events)
         past_value = 0
@@ -142,17 +509,16 @@ def vista_generacion():
 
             progreso = (i + 1) / max_generaciones
             progreso_bar.value = progreso
-            txt_progreso.value = f"Generación {i+1}/{max_generaciones} - Mejor Fitness: {best_fitness}"
+            txt_progreso.value = f"Generación {i+1}/{max_generaciones} - Puntaje: {best_fitness}"
             page.update()
 
             if count > 150:
-                txt_progreso.value = f"Algoritmo estancado en gen {i+1}. Finalizando..."
+                txt_progreso.value = f"Algoritmo convergido en gen {i+1}. Finalizando..."
                 page.update()
                 break
 
             past_value = best_fitness
 
-        # Evaluación final y obtención del mejor horario
         if academic_hours is not None and academic_hours_limits is not None:
             scores = genetics.fitness(population, academic_hours, academic_hours_limits)
         else:
@@ -162,31 +528,28 @@ def vista_generacion():
         fitness_population.sort(key=lambda x: x[0])
         best_timetable = fitness_population[0][1]
         
-        # Guardamos en memoria el mejor horario calculado
         estado_ref["best_timetable"] = best_timetable
 
-        # 2. Exportación a PDF llamando a export_all DIRECTAMENTE con el timetable calculado
-        if export_all is not None:
-            txt_progreso.value = "Generando archivos PDF de exportación..."
-            page.update()
-            export_all(
-                timetable=best_timetable,
-                output_dir="data/export",
-                year_label=dd_anio.value
-            )
+        if hasattr(genetics, 'evaluate_and_report'):
+            final_report = genetics.evaluate_and_report(best_timetable)
+        else:
+            final_report = {"total_fitness": fitness_population[0][0]}
 
-        # Finalizar estado de la interfaz
+        estado_ref["final_report"] = final_report
+
+        panel_info_container.content = construir_vista_reporte(final_report, page)
+
         estado_ref["generado"] = True
         estado_ref["en_progreso"] = False
 
         progreso_bar.visible = False
         txt_progreso.visible = False
         btn_generar.disabled = False
-        btn_regenerar.disabled = False
         btn_generar.visible = False
         btn_regenerar.visible = True
+        btn_regenerar.disabled = False
         btn_exportar.visible = True
-        badge_estado.visible = True
+        btn_exportar.disabled = False
         page.update()
 
     def iniciar_generacion(e):
@@ -199,44 +562,17 @@ def vista_generacion():
         txt_progreso.value = "Iniciando algoritmo genético..."
         btn_generar.disabled = True
         btn_regenerar.disabled = True
+        btn_exportar.visible = False
         badge_estado.visible = False
         e.page.update()
 
         threading.Thread(target=ejecutar_algoritmo_genetico, args=(e.page,), daemon=True).start()
 
     def regenerar(e):
-        btn_regenerar.visible = False
-        btn_exportar.visible = False
-        btn_generar.visible = True
-        badge_estado.visible = False
-        e.page.update()
         iniciar_generacion(e)
 
     def exportar(e):
-        output_dir = "data/export"
-        best_timetable = estado_ref.get("best_timetable")
-
-        if export_all is not None and best_timetable is not None:
-            export_all(
-                timetable=best_timetable,
-                output_dir=output_dir,
-                year_label=dd_anio.value
-            )
-            msj = f"Horarios exportados exitosamente en '{output_dir}'"
-        elif best_timetable is None:
-            msj = "Primero debes generar un horario antes de exportar."
-        else:
-            msj = "Módulo de exportación no disponible"
-
-        e.page.snack_bar = ft.SnackBar(
-            ft.Row([
-                ft.Icon(ft.icons.CHECK_CIRCLE if best_timetable else ft.icons.WARNING, color="#439A5D"),
-                ft.Text(msj, color=ft.colors.WHITE)
-            ]),
-            bgcolor="#1A2A20"
-        )
-        e.page.snack_bar.open = True
-        e.page.update()
+        ejecutar_exportacion(e.page, button_triggered=e.control)
 
     btn_generar.on_click = iniciar_generacion
     btn_regenerar.on_click = regenerar
@@ -305,7 +641,7 @@ def vista_generacion():
                 border=ft.border.all(1, "#439A5D"),
                 content=ft.Row([
                     ft.Icon(ft.icons.CHECK_CIRCLE_OUTLINE, color="#439A5D", size=16),
-                    ft.Text("Sin conflictos de superposición", color="#439A5D", size=12)
+                    ft.Text("Sistema de auditoría de choques activo", color="#439A5D", size=12)
                 ])
             ),
         ], spacing=12)
@@ -336,11 +672,7 @@ def vista_generacion():
                             spacing=0,
                             expand_loose=True,
                             controls=[
-                                ft.Container(
-                                    **estilo_tarjeta_oscura,
-                                    expand=True,
-                                    content=panel_info_estado
-                                )
+                                panel_info_container
                             ]
                         )
                     ]

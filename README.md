@@ -104,7 +104,7 @@ python src/engine/genetics.py
 **O si tienes problemas también puedes intentar con el siguiente comando**
 
 ```bash
-python -m src.database.genetics
+python -m src.engine.genetics
 ```
 
 ---

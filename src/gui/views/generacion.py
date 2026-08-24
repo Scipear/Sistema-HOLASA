@@ -26,6 +26,7 @@ def vista_generacion():
         "generado": False, 
         "en_progreso": False,
         "exportando": False,
+        "detener": False,
         "best_timetable": None,
         "final_report": None
     }
@@ -59,6 +60,16 @@ def vista_generacion():
         bgcolor="#439A5D", color=ft.colors.WHITE, height=48, expand=True,
         style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=10))
     )
+    btn_detener = ft.ElevatedButton(
+        "Detener",
+        icon=ft.icons.STOP_CIRCLE_ROUNDED,
+        bgcolor="#3A1C1C", color="#FF6B6B", height=48,
+        style=ft.ButtonStyle(
+            shape=ft.RoundedRectangleBorder(radius=10),
+            side=ft.BorderSide(1, "#FF6B6B")
+        ),
+        visible=False
+    )
     btn_regenerar = ft.ElevatedButton(
         "Regenerar",
         icon=ft.icons.REFRESH,
@@ -88,23 +99,134 @@ def vista_generacion():
         border=ft.border.all(1, "#439A5D")
     )
 
-    sw_priorizar_prof = ft.Switch(value=True, active_color="#439A5D")
-    sw_priorizar_elec = ft.Switch(value=False, active_color="#439A5D")
-    sw_min_vacios = ft.Switch(value=True, active_color="#439A5D")
-    sw_aulas_tec = ft.Switch(value=True, active_color="#439A5D")
+    # ---------------------------------------------------------------
+    # HELPERS PARA CONFIGURACIÓN DE ACTIVIDAD COMPLEMENTARIA
+    # ---------------------------------------------------------------
+    def _get_days():
+        """Retorna [(day_index, day_name), ...] desde academic_hours de genetics."""
+        if genetics and hasattr(genetics, 'academic_hours') and genetics.academic_hours:
+            seen = {}
+            for ah in genetics.academic_hours:
+                if ah.day_index not in seen:
+                    seen[ah.day_index] = ah.day
+            return sorted(seen.items())  # [(idx, name)]
+        return [(0,"Lunes"),(1,"Martes"),(2,"Miércoles"),(3,"Jueves"),(4,"Viernes")]
+
+    def _get_block_options(day_index):
+        """Retorna opciones de bloque válidas para un día (excluye el último bloque)."""
+        if genetics and hasattr(genetics, 'academic_hours') and genetics.academic_hours:
+            day_blocks = sorted(
+                [ah for ah in genetics.academic_hours if ah.day_index == day_index],
+                key=lambda ah: ah.index
+            )
+            valid = day_blocks[:-1]  # excluir último (no alcanza para 2 horas)
+            return [ft.dropdown.Option(key=str(ah.index), text=f"{ah.start_hour} – {ah.end_hour}") for ah in valid]
+        return []
+
+    def _find_day_index(name_fragment):
+        """Busca day_index por fragmento de nombre."""
+        for idx, name in _get_days():
+            if name_fragment.lower() in name.lower():
+                return idx
+        return 0
+
+    def _last_valid_block(day_index):
+        """Retorna el índice del penúltimo bloque del día (el mayor start_index válido)."""
+        if genetics and hasattr(genetics, 'academic_hours') and genetics.academic_hours:
+            day_blocks = sorted(
+                [ah for ah in genetics.academic_hours if ah.day_index == day_index],
+                key=lambda ah: ah.index
+            )
+            if len(day_blocks) >= 2:
+                return day_blocks[-2].index
+        return None
+
+    # Valores por defecto: años 1-3 → martes, años 4-5 → jueves (igual que antes)
+    _def_martes = _find_day_index("martes")
+    _def_jueves = _find_day_index("jueves")
+    _def_blk_martes = _last_valid_block(_def_martes) or 18
+    _def_blk_jueves = _last_valid_block(_def_jueves) or 38
+
+    _YEAR_DEFAULTS = {
+        1: (_def_martes, _def_blk_martes),
+        2: (_def_martes, _def_blk_martes),
+        3: (_def_martes, _def_blk_martes),
+        4: (_def_jueves, _def_blk_jueves),
+        5: (_def_jueves, _def_blk_jueves),
+    }
+
+    # Dropdowns por año
+    _day_dds = {}    # year -> ft.Dropdown
+    _block_dds = {}  # year -> ft.Dropdown
+
+    def _build_block_dd(day_index, default_block_idx):
+        opts = _get_block_options(day_index)
+        default_key = str(default_block_idx) if opts else None
+        if opts and default_key not in [o.key for o in opts]:
+            default_key = opts[-1].key  # fallback al último válido
+        return ft.Dropdown(
+            options=opts,
+            value=default_key,
+            border_color="#303346", focused_border_color="#439A5D",
+            bgcolor="#13141C", color=ft.colors.WHITE,
+            height=48, border_radius=8, expand=True,
+            text_size=11,
+        )
+
+    def _on_day_change(e, year):
+        new_day_idx = int(e.control.value)
+        new_opts = _get_block_options(new_day_idx)
+        blk_dd = _block_dds[year]
+        blk_dd.options = new_opts
+        blk_dd.value = new_opts[-1].key if new_opts else None
+        blk_dd.update()
+
+    _YEAR_LABELS = {1:"1° Año", 2:"2° Año", 3:"3° Año", 4:"4° Año", 5:"5° Año"}
+
+    def _crear_fila_anio(year):
+        def_day, def_blk = _YEAR_DEFAULTS[year]
+        day_opts = [ft.dropdown.Option(key=str(idx), text=name) for idx, name in _get_days()]
+        day_dd = ft.Dropdown(
+            options=day_opts,
+            value=str(def_day),
+            border_color="#303346", focused_border_color="#439A5D",
+            bgcolor="#13141C", color=ft.colors.WHITE,
+            height=48, border_radius=8,
+            text_size=11,
+            width=110,
+        )
+        blk_dd = _build_block_dd(def_day, def_blk)
+        day_dd.on_change = lambda e: _on_day_change(e, year)
+        _day_dds[year] = day_dd
+        _block_dds[year] = blk_dd
+        return ft.Row([
+            ft.Text(_YEAR_LABELS[year], color="#A0A0B0", size=12, width=52),
+            day_dd,
+            blk_dd,
+        ], spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER)
+
+    filas_comp = [_crear_fila_anio(y) for y in range(1, 6)]
+
+    def _leer_comp_config():
+        """Lee los valores actuales de los dropdowns y devuelve el dict de config."""
+        config = {}
+        for year in range(1, 6):
+            try:
+                day_idx = int(_day_dds[year].value)
+                blk_idx = int(_block_dds[year].value)
+                config[year] = {"day_index": day_idx, "start_index": blk_idx}
+            except (TypeError, ValueError):
+                pass
+        return config
+
 
     dd_anio = ft.Dropdown(
         options=[ft.dropdown.Option("2024 - 2025"), ft.dropdown.Option("2025 - 2026")],
         value="2025 - 2026",
         border_color="#303346", focused_border_color="#439A5D",
         bgcolor="#13141C", color=ft.colors.WHITE,
-        height=45, border_radius=10
+        height=48, border_radius=10
     )
-
-    def fila_switch(etiqueta, sw):
-        return ft.Row([
-            ft.Text(etiqueta, color=ft.colors.WHITE, size=13, expand=True), sw
-        ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
 
     def resetear_vista(page):
         estado_ref["generado"] = False
@@ -472,24 +594,79 @@ def vista_generacion():
     # -------------------------------------------------------------
     # EJECUCIÓN DEL ALGORITMO GENÉTICO EN SEGUNDO PLANO
     # -------------------------------------------------------------
+    def _reset_ui_post_generacion(page):
+        """Restaura botones y UI al terminar o cancelar la generación."""
+        estado_ref["en_progreso"] = False
+        estado_ref["detener"] = False
+        progreso_bar.visible = False
+        txt_progreso.visible = False
+        btn_detener.visible = False
+        btn_generar.disabled = False
+        btn_generar.visible = True
+        btn_regenerar.disabled = False
+        page.update()
+
     def ejecutar_algoritmo_genetico(page):
         max_generaciones = 250
 
         if genetics is None:
-            page.snack_bar = ft.SnackBar(ft.Text("Error: No se pudo importar src.engine.genetics"))
+            page.snack_bar = ft.SnackBar(ft.Text("Error: No se pudo importar src.engine.genetics"), bgcolor="#2A1C1C")
             page.snack_bar.open = True
-            page.update()
+            _reset_ui_post_generacion(page)
             return
 
-        events = genetics.create_events()
-        population = genetics.create_population(50, events)
-        past_value = 0
-        count = 0
+        try:
+            # Leer config de actividad complementaria desde la UI
+            comp_config = _leer_comp_config()
+            if genetics and hasattr(genetics, 'set_complementary_config') and comp_config:
+                genetics.set_complementary_config(comp_config)
 
-        academic_hours = getattr(genetics, 'academic_hours', None)
-        academic_hours_limits = getattr(genetics, 'academic_hours_limits', None)
+            events = genetics.create_events()
+            population = genetics.create_population(50, events, comp_config)
 
-        for i in range(max_generaciones):
+            past_value = 0
+            count = 0
+
+            academic_hours = getattr(genetics, 'academic_hours', None)
+            academic_hours_limits = getattr(genetics, 'academic_hours_limits', None)
+
+            for i in range(max_generaciones):
+                # ── Chequeo de cancelación ──────────────────────────
+                if estado_ref["detener"]:
+                    txt_progreso.value = "Generación detenida por el usuario."
+                    page.update()
+                    _reset_ui_post_generacion(page)
+                    return
+
+                if academic_hours is not None and academic_hours_limits is not None:
+                    scores = genetics.fitness(population, academic_hours, academic_hours_limits)
+                else:
+                    scores = genetics.fitness(population)
+
+                fitness_population = list(zip(scores, population))
+                fitness_population.sort(key=lambda x: x[0])
+                best_fitness = fitness_population[0][0]
+
+                selected_population = genetics.selection(fitness_population, 10)
+                population = genetics.crossover(selected_population, 50)
+
+                if past_value == best_fitness:
+                    count += 1
+                else:
+                    count = 0
+
+                progreso = (i + 1) / max_generaciones
+                progreso_bar.value = progreso
+                txt_progreso.value = f"Generación {i+1}/{max_generaciones} - Puntaje: {best_fitness}"
+                page.update()
+
+                if count > 150:
+                    txt_progreso.value = f"Algoritmo convergido en gen {i+1}. Finalizando..."
+                    page.update()
+                    break
+
+                past_value = best_fitness
+
             if academic_hours is not None and academic_hours_limits is not None:
                 scores = genetics.fitness(population, academic_hours, academic_hours_limits)
             else:
@@ -497,65 +674,54 @@ def vista_generacion():
 
             fitness_population = list(zip(scores, population))
             fitness_population.sort(key=lambda x: x[0])
-            best_fitness = fitness_population[0][0]
+            best_timetable = fitness_population[0][1]
+            
+            estado_ref["best_timetable"] = best_timetable
 
-            selected_population = genetics.selection(fitness_population, 10)
-            population = genetics.crossover(selected_population, 50)
-
-            if past_value == best_fitness:
-                count += 1
+            if hasattr(genetics, 'evaluate_and_report'):
+                final_report = genetics.evaluate_and_report(best_timetable)
             else:
-                count = 0
+                final_report = {"total_fitness": fitness_population[0][0]}
 
-            progreso = (i + 1) / max_generaciones
-            progreso_bar.value = progreso
-            txt_progreso.value = f"Generación {i+1}/{max_generaciones} - Puntaje: {best_fitness}"
+            estado_ref["final_report"] = final_report
+            panel_info_container.content = construir_vista_reporte(final_report, page)
+            estado_ref["generado"] = True
+
+            progreso_bar.visible = False
+            txt_progreso.visible = False
+            btn_detener.visible = False
+            btn_generar.visible = False
+            btn_regenerar.visible = True
+            btn_regenerar.disabled = False
+            btn_exportar.visible = True
+            btn_exportar.disabled = False
+            estado_ref["en_progreso"] = False
+            estado_ref["detener"] = False
             page.update()
 
-            if count > 150:
-                txt_progreso.value = f"Algoritmo convergido en gen {i+1}. Finalizando..."
-                page.update()
-                break
-
-            past_value = best_fitness
-
-        if academic_hours is not None and academic_hours_limits is not None:
-            scores = genetics.fitness(population, academic_hours, academic_hours_limits)
-        else:
-            scores = genetics.fitness(population)
-
-        fitness_population = list(zip(scores, population))
-        fitness_population.sort(key=lambda x: x[0])
-        best_timetable = fitness_population[0][1]
-        
-        estado_ref["best_timetable"] = best_timetable
-
-        if hasattr(genetics, 'evaluate_and_report'):
-            final_report = genetics.evaluate_and_report(best_timetable)
-        else:
-            final_report = {"total_fitness": fitness_population[0][0]}
-
-        estado_ref["final_report"] = final_report
-
-        panel_info_container.content = construir_vista_reporte(final_report, page)
-
-        estado_ref["generado"] = True
-        estado_ref["en_progreso"] = False
-
-        progreso_bar.visible = False
-        txt_progreso.visible = False
-        btn_generar.disabled = False
-        btn_generar.visible = False
-        btn_regenerar.visible = True
-        btn_regenerar.disabled = False
-        btn_exportar.visible = True
-        btn_exportar.disabled = False
-        page.update()
+        except Exception as ex:
+            import traceback
+            err_msg = str(ex) or type(ex).__name__
+            traceback.print_exc()  # sigue imprimiendo en consola para debug
+            page.snack_bar = ft.SnackBar(
+                content=ft.Row([
+                    ft.Icon(ft.icons.ERROR_ROUNDED, color="#FF6B6B", size=18),
+                    ft.Text(
+                        f"Error durante la generación: {err_msg}",
+                        color=ft.colors.WHITE, size=12, expand=True
+                    ),
+                ]),
+                bgcolor="#2A1C1C",
+                duration=8000,
+            )
+            page.snack_bar.open = True
+            _reset_ui_post_generacion(page)
 
     def iniciar_generacion(e):
         if estado_ref["en_progreso"]:
             return
         estado_ref["en_progreso"] = True
+        estado_ref["detener"] = False
         progreso_bar.value = 0
         progreso_bar.visible = True
         txt_progreso.visible = True
@@ -564,6 +730,9 @@ def vista_generacion():
         btn_regenerar.disabled = True
         btn_exportar.visible = False
         badge_estado.visible = False
+        btn_detener.visible = True
+        btn_detener.disabled = False
+        btn_detener.text = "Detener"
         e.page.update()
 
         threading.Thread(target=ejecutar_algoritmo_genetico, args=(e.page,), daemon=True).start()
@@ -571,10 +740,17 @@ def vista_generacion():
     def regenerar(e):
         iniciar_generacion(e)
 
+    def detener(e):
+        estado_ref["detener"] = True
+        btn_detener.disabled = True
+        btn_detener.text = "Deteniendo..."
+        e.page.update()
+
     def exportar(e):
         ejecutar_exportacion(e.page, button_triggered=e.control)
 
     btn_generar.on_click = iniciar_generacion
+    btn_detener.on_click = detener
     btn_regenerar.on_click = regenerar
     btn_exportar.on_click = exportar
 
@@ -582,29 +758,34 @@ def vista_generacion():
         **estilo_tarjeta_oscura,
         content=ft.Column([
             ft.Text("Configuración", size=16, weight=ft.FontWeight.BOLD, color=ft.colors.WHITE),
-            ft.Tabs(
-                selected_index=0,
-                tabs=[ft.Tab(text="Parámetros"), ft.Tab(text="Preferencias")],
-                label_color="#439A5D",
-                unselected_label_color="#A0A0B0",
-                indicator_color="#439A5D",
-                height=46
-            ),
             ft.Text("Año Escolar", color="#A0A0B0", size=12),
             dd_anio,
             ft.Divider(color="#303346", height=8),
-            fila_switch("Priorizar Profesores", sw_priorizar_prof),
-            fila_switch("Priorizar Electrónicos", sw_priorizar_elec),
-            fila_switch("Minimizar Bloques Vacíos", sw_min_vacios),
-            fila_switch("Asignar Aulas Técnicas", sw_aulas_tec),
+            ft.Row([
+                ft.Icon(ft.icons.EVENT_NOTE_ROUNDED, color="#439A5D", size=16),
+                ft.Text("Actividad Complementaria", size=13, weight=ft.FontWeight.BOLD, color=ft.colors.WHITE),
+            ], spacing=6),
+            ft.Text(
+                "Selecciona el día y bloque de inicio para cada año.",
+                color="#6A6A80", size=11,
+            ),
+            ft.Row([
+                ft.Text("", width=52),
+                ft.Text("Día", color="#6A6A80", size=11, width=110),
+                ft.Text("Bloque inicio", color="#6A6A80", size=11, expand=True),
+            ], spacing=6),
+            *filas_comp,
             ft.Divider(color="#303346", height=8),
             progreso_bar,
             txt_progreso,
             ft.Row([btn_generar, btn_regenerar], spacing=10),
+            ft.Row([btn_detener], spacing=10),
             btn_exportar,
             badge_estado,
-        ], spacing=12)
+        ], spacing=10, scroll=ft.ScrollMode.AUTO)
     )
+
+
 
     panel_stats = ft.Container(
         **estilo_tarjeta_oscura,
@@ -666,7 +847,7 @@ def vista_generacion():
                     spacing=20,
                     vertical_alignment=ft.CrossAxisAlignment.START,
                     controls=[
-                        ft.Column(expand=4, spacing=20, controls=[panel_config, panel_stats]),
+                        ft.Column(expand=4, spacing=20, controls=[panel_config, panel_stats], scroll=ft.ScrollMode.AUTO),
                         ft.Column(
                             expand=6,
                             spacing=0,

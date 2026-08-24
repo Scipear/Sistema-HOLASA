@@ -28,6 +28,22 @@ GLOBAL_BLOCKED_HOURS = {
     39,
 }
 
+# Configuración dinámica de horas de Actividad Complementaria por año
+_COMPLEMENTARY_CONFIG = None
+
+def set_complementary_config(config: dict):
+    """
+    Actualiza GLOBAL_BLOCKED_HOURS con los bloques configurados desde la UI.
+    config: {year_int: {"day_index": int, "start_index": int}}
+    """
+    global GLOBAL_BLOCKED_HOURS, _COMPLEMENTARY_CONFIG
+    _COMPLEMENTARY_CONFIG = config
+    new_blocked = set()
+    for year_config in config.values():
+        start = year_config["start_index"]
+        new_blocked.update({start, start + 1})  # 2 horas académicas seguidas
+    GLOBAL_BLOCKED_HOURS = new_blocked
+
 def fast_copy_event(event: Event) -> Event:
     """Clonación manual ultrarrápida, reduciendo overhead de copy.deepcopy."""
     new_e = Event.__new__(Event)
@@ -519,6 +535,12 @@ def create_events():
         sorted_subjects = sorted(group.subjects, key=lambda s: s.hours, reverse=True)
 
         for subject in sorted_subjects:
+            # Actividad Complementaria: sin profesor, sin aula, siempre 2 horas
+            if subject.name == "Actividad Complementaria":
+                event_list.append(Event(id, None, subject, group, 2, None))
+                id += 1
+                continue
+
             teacher = None
             room = None
             left_hours = subject.hours
@@ -551,7 +573,7 @@ def create_events():
 
     return event_list
 
-def create_timetable(events: list[Event], blocked_hours_by_group: dict = None):
+def create_timetable(events: list[Event], complementary_config: dict = None):
     timetable = []
     groups_block = {}
     teachers_block = {}
@@ -571,7 +593,15 @@ def create_timetable(events: list[Event], blocked_hours_by_group: dict = None):
 
     for event in complementary_events:
         group = GROUPS_BY_ID.get(event.group)
-        if group.year <= 3:
+        # Forzar sin profesor ni aula
+        event.teacher = None
+        event.room = None
+
+        # Usar config dinámica o fallback estático
+        cfg = (complementary_config or _COMPLEMENTARY_CONFIG or {})
+        if group.year in cfg:
+            event.start_hour = cfg[group.year]["start_index"]
+        elif group.year <= 3:
             event.start_hour = 18
         else:
             event.start_hour = 38
@@ -696,8 +726,8 @@ def create_timetable(events: list[Event], blocked_hours_by_group: dict = None):
     return repair_and_compact_timetable(timetable)
 
 
-def create_population(size: int, events: list[Event]):
-    return [create_timetable(events) for _ in range(size)]
+def create_population(size: int, events: list[Event], complementary_config: dict = None):
+    return [create_timetable(events, complementary_config) for _ in range(size)]
 
 def selection(population, size):
     population.sort(key=lambda x: x[0])

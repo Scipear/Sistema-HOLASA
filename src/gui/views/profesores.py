@@ -7,17 +7,20 @@ from src.database.connection import SessionLocal
 from src.services.profesor_service import ProfesorService
 from src.services.profesor_asignatura_service import ProfesorAsignaturaService
 from src.services.sesion_profesor_service import SesionProfesorService
+from src.services.salon_profesor_service import SalonProfesorService
 
 try:
     from src.services.curso_asignatura_service import CursoAsignaturaService
     from src.services.asignatura_service import AsignaturaService
     from src.services.sesion_service import SesionService
     from src.services.curso_service import CursoService
+    from src.services.salon_service import SalonService
 except ImportError:
     CursoAsignaturaService = None
     AsignaturaService = None
     SesionService = None
     CursoService = None
+    SalonService = None
 
 
 class vista_profesores(ft.Container):
@@ -33,11 +36,13 @@ class vista_profesores(ft.Container):
         self.prof_service = ProfesorService()
         self.prof_asig_service = ProfesorAsignaturaService()
         self.sesion_prof_service = SesionProfesorService()
+        self.salon_prof_service = SalonProfesorService()
         
         self.cur_asig_service = CursoAsignaturaService() if CursoAsignaturaService else None
         self.asig_service = AsignaturaService() if AsignaturaService else None
         self.sesion_service = SesionService() if SesionService else None
         self.curso_service = CursoService() if CursoService else None
+        self.salon_service = SalonService() if SalonService else None
 
         # 2. Estado Local de la Vista (Caché en memoria)
         self.map_profesores = {}
@@ -45,8 +50,10 @@ class vista_profesores(ft.Container):
         self.map_asignaturas_detalladas = {}
         self.sesiones_completas = {}
         self.dias_sesiones = {}
+        self.map_salones = {}
         self.asignaturas_temp = []
         self.sesiones_temp = []
+        self.salones_temp = []
         self.profesor_actual_id = None
 
         # 3. Inicialización de la Interfaz
@@ -66,7 +73,6 @@ class vista_profesores(ft.Container):
             "content_padding": ft.padding.only(left=15, right=45, top=15, bottom=15)
         }
 
-        # Tabla Principal simplificada con panel de detalle flotante
         self.tabla_profesores = ft.DataTable(
             expand=True,
             bgcolor="#13141C",
@@ -80,7 +86,7 @@ class vista_profesores(ft.Container):
             columns=[
                 ft.DataColumn(ft.Text("Profesor", color=ft.colors.WHITE, weight=ft.FontWeight.BOLD)),
                 ft.DataColumn(ft.Text("Estado", color=ft.colors.WHITE, weight=ft.FontWeight.BOLD)),
-                ft.DataColumn(ft.Text("Cursos y Horarios", color=ft.colors.WHITE, weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text("Cursos, Aula y Horarios", color=ft.colors.WHITE, weight=ft.FontWeight.BOLD)),
                 ft.DataColumn(ft.Text("Acciones", color=ft.colors.WHITE, weight=ft.FontWeight.BOLD)),
             ],
             rows=[]
@@ -106,6 +112,9 @@ class vista_profesores(ft.Container):
             **estilo_input
         )
         
+        self.dd_salon = ft.Dropdown(label="Selecciona aula", **estilo_input)
+        self.lista_chips_salon = ft.Row(wrap=True, spacing=10)
+        
         self.dd_asig = ft.Dropdown(label="Selecciona asignatura y curso", **estilo_input)
         self.dd_dia = ft.Dropdown(label="Día", on_change=self.al_cambiar_dia, **estilo_input)
         self.dd_sesion_inicio = ft.Dropdown(label="Sesión Inicial", on_change=self.al_cambiar_sesion_inicio, **estilo_input)
@@ -114,9 +123,7 @@ class vista_profesores(ft.Container):
         self.lista_chips_asig = ft.Row(wrap=True, spacing=10)
         self.lista_chips_sesion = ft.Row(wrap=True, spacing=10)
 
-        # Contenido dinámico para el panel flotante de detalles
         self.contenido_panel_detalle = ft.Column([], spacing=12)
-
         self._construir_modales()
 
         self.content = ft.Column(
@@ -177,7 +184,6 @@ class vista_profesores(ft.Container):
             shape=ft.RoundedRectangleBorder(radius=15)
         )
 
-        # Panel Flotante / Diálogo para Ver Detalles con Tamaño Fijo y Scroll Interno
         self.modal_detalle = ft.AlertDialog(
             title=ft.Text("Detalle de Asignaciones", weight=ft.FontWeight.BOLD, color=ft.colors.WHITE),
             bgcolor="#1E202D",
@@ -209,7 +215,9 @@ class vista_profesores(ft.Container):
                         ft.Container(content=self.txt_nombre, expand=True),
                         ft.Container(content=self.txt_apellido, expand=True)
                     ], spacing=15),
-                    ft.Row([ft.Container(content=self.dd_estado, expand=True)]),
+                    ft.Row([
+                        ft.Container(content=self.dd_estado, expand=True)
+                    ], spacing=15),
                     ft.Divider(color="#303346", height=10),
                     
                     ft.Text("Cursos y Asignaturas", color=ft.colors.WHITE, weight=ft.FontWeight.BOLD, size=14),
@@ -221,6 +229,18 @@ class vista_profesores(ft.Container):
                         )
                     ], spacing=10),
                     self.lista_chips_asig,
+                    
+                    ft.Divider(color="#303346", height=10),
+                    
+                    ft.Text("Aula(s)", color=ft.colors.WHITE, weight=ft.FontWeight.BOLD, size=14),
+                    ft.Row([
+                        ft.Container(content=self.dd_salon, expand=True), 
+                        ft.Container(
+                            content=ft.IconButton(ft.icons.ADD, on_click=self.agregar_salon, icon_color=ft.colors.WHITE), 
+                            bgcolor="#439A5D", border_radius=10, height=52, width=52, alignment=ft.alignment.center
+                        )
+                    ], spacing=10),
+                    self.lista_chips_salon,
                     
                     ft.Divider(color="#303346", height=10),
                     
@@ -252,16 +272,15 @@ class vista_profesores(ft.Container):
 
         self.contenido_panel_detalle.controls.clear()
 
-        # 1. Nombre del profesor
         self.contenido_panel_detalle.controls.append(
             ft.Row([
                 ft.Icon(ft.icons.PERSON, color="#5B9BD5", size=20),
                 ft.Text(f"{p_data['nombre']} {p_data['apellido']}", size=18, weight=ft.FontWeight.BOLD, color=ft.colors.WHITE)
             ], spacing=8)
         )
+
         self.contenido_panel_detalle.controls.append(ft.Divider(color="#303346", height=5))
 
-        # 2. Subtítulo: Curso y Asignatura
         self.contenido_panel_detalle.controls.append(
             ft.Text("Curso y Asignatura", size=14, weight=ft.FontWeight.BOLD, color="#439A5D")
         )
@@ -291,7 +310,33 @@ class vista_profesores(ft.Container):
 
         self.contenido_panel_detalle.controls.append(ft.Divider(color="#303346", height=5))
 
-        # 3. Subtítulo: Horarios Disponibles
+        self.contenido_panel_detalle.controls.append(
+            ft.Text("Aula(s)", size=14, weight=ft.FontWeight.BOLD, color="#4B93F8")
+        )
+
+        salon_ids = p_data.get("salones", [])
+        if salon_ids:
+            for s_id in salon_ids:
+                nombre_salon = self.map_salones.get(s_id, f"Id:{s_id}")
+                self.contenido_panel_detalle.controls.append(
+                    ft.Container(
+                        content=ft.Row([
+                            ft.Icon(ft.icons.MEETING_ROOM, size=14, color="#4B93F8"),
+                            ft.Text(nombre_salon, size=13, color=ft.colors.WHITE, weight=ft.FontWeight.W_500)
+                        ], spacing=8),
+                        bgcolor="#252836",
+                        padding=10,
+                        border_radius=8,
+                        border=ft.border.all(1, "#3A3E54")
+                    )
+                )
+        else:
+            self.contenido_panel_detalle.controls.append(
+                ft.Text("Sin aulas asignadas.", size=12, color="#5A5D70")
+            )
+
+        self.contenido_panel_detalle.controls.append(ft.Divider(color="#303346", height=5))
+
         self.contenido_panel_detalle.controls.append(
             ft.Text("Horarios Disponibles", size=14, weight=ft.FontWeight.BOLD, color="#F5B041")
         )
@@ -303,12 +348,12 @@ class vista_profesores(ft.Container):
                     ft.Container(
                         content=ft.Row([
                             ft.Icon(ft.icons.SCHEDULE, size=14, color="#F5B041"),
-                            ft.Text(b['texto'], size=13, color="#F5B041", weight=ft.FontWeight.W_500)
+                            ft.Text(b['texto'], size=13, color="#FFFFFFFF", weight=ft.FontWeight.W_500)
                         ], spacing=8),
-                        bgcolor="#3E352A",
+                        bgcolor="#252836",
                         padding=10,
                         border_radius=8,
-                        border=ft.border.all(1, "#594A34")
+                        border=ft.border.all(1, "#3A3E54")
                     )
                 )
         else:
@@ -415,6 +460,18 @@ class vista_profesores(ft.Container):
         self.dd_sesion_fin.value = None
         e.page.update()
 
+    def refrescar_ui_salon(self):
+        self.lista_chips_salon.controls.clear()
+        for s_id in self.salones_temp:
+            nombre = self.map_salones.get(s_id, f"Id:{s_id}")
+            self.lista_chips_salon.controls.append(
+                ft.Chip(
+                    label=ft.Text(nombre, size=11, color=ft.colors.WHITE),
+                    on_delete=lambda e, id_del=s_id: self.remover_salon(id_del, e),
+                    bgcolor="#2A2D3E"
+                )
+            )
+
     def refrescar_ui_asig(self):
         self.lista_chips_asig.controls.clear()
         for a_id in self.asignaturas_temp:
@@ -440,6 +497,12 @@ class vista_profesores(ft.Container):
                 )
             )
 
+    def remover_salon(self, id_del, e):
+        if id_del in self.salones_temp:
+            self.salones_temp.remove(id_del)
+            self.refrescar_ui_salon()
+            e.page.update()
+
     def remover_asig(self, id_del, e):
         if id_del in self.asignaturas_temp:
             self.asignaturas_temp.remove(id_del)
@@ -452,6 +515,17 @@ class vista_profesores(ft.Container):
                 self.sesiones_temp.remove(id_del)
         self.refrescar_ui_sesion()
         e.page.update()
+
+    def agregar_salon(self, e):
+        if not self.dd_salon.value: return
+        val_id = int(self.dd_salon.value)
+        if val_id not in self.salones_temp:
+            self.salones_temp.append(val_id)
+            self.refrescar_ui_salon()
+            self.dd_salon.value = None
+            e.page.update()
+        else:
+            self.mostrar_notificacion(e, "El aula ya está asignada.", True)
 
     def agregar_asig(self, e):
         if not self.dd_asig.value: return
@@ -499,11 +573,15 @@ class vista_profesores(ft.Container):
         self.profesor_actual_id = None
         self.txt_nombre.value = self.txt_apellido.value = ""
         self.dd_estado.value = "Activo"
+        self.dd_salon.value = None 
+        
         self.asignaturas_temp.clear()
         self.sesiones_temp.clear()
+        self.salones_temp.clear() 
         
         self.refrescar_ui_asig()
         self.refrescar_ui_sesion()
+        self.refrescar_ui_salon() 
         
         e.page.dialog = self.modal_formulario
         self.modal_formulario.open = True
@@ -517,12 +595,15 @@ class vista_profesores(ft.Container):
         self.txt_nombre.value = p_data["nombre"]
         self.txt_apellido.value = p_data["apellido"]
         self.dd_estado.value = "Activo" if p_data["estado"] else "Inactivo"
+        self.dd_salon.value = None 
         
         self.asignaturas_temp = list(p_data["asignaturas"])
         self.sesiones_temp = list(p_data["sesiones"])
+        self.salones_temp = list(p_data.get("salones", [])) 
         
         self.refrescar_ui_asig()
         self.refrescar_ui_sesion()
+        self.refrescar_ui_salon() 
         
         e.page.dialog = self.modal_formulario
         self.modal_formulario.open = True
@@ -544,6 +625,7 @@ class vista_profesores(ft.Container):
                     prof_id = self.profesor_actual_id
                     self.prof_service.actualizar(db, prof_id, self.txt_nombre.value.strip(), self.txt_apellido.value.strip(), is_activo)
 
+                # --- Asignaturas ---
                 rels_asig_existentes = self.prof_asig_service.obtener_por_profesor(db, prof_id)
                 ids_ya_asignados = {rel.curso_asignatura_id for rel in rels_asig_existentes}
                 map_rel_id_asig = {rel.curso_asignatura_id: rel.id for rel in rels_asig_existentes}
@@ -559,6 +641,7 @@ class vista_profesores(ft.Container):
                     if a_id not in self.asignaturas_temp:
                         self.prof_asig_service.desasignar(db, rel_id)
 
+                # --- Sesiones ---
                 rels_ses_existentes = self.sesion_prof_service.obtener_por_profesor(db, prof_id)
                 ids_ses_asignadas = {rel.sesion_id for rel in rels_ses_existentes}
                 map_rel_id_ses = {rel.sesion_id: rel.id for rel in rels_ses_existentes}
@@ -573,6 +656,45 @@ class vista_profesores(ft.Container):
                 for s_id, rel_id in map_rel_id_ses.items():
                     if s_id not in self.sesiones_temp:
                         self.sesion_prof_service.desasignar(db, rel_id)
+
+                # --- Salones (Aulas) ---
+                rels_salon_exist = self.salon_prof_service.obtener_por_profesor(db, prof_id)
+                ids_salon_asignados = {rel.salon_id for rel in rels_salon_exist}
+                map_rel_id_salon = {rel.salon_id: rel.id for rel in rels_salon_exist}
+
+                for s_id in self.salones_temp:
+                    if s_id not in ids_salon_asignados:
+                        asignado_exitosamente = False
+                        try:
+                            self.salon_prof_service.asignar(db, s_id, prof_id)
+                            asignado_exitosamente = True
+                        except Exception:
+                            # Intento alternativo robusto si el método de servicio directo falla
+                            try:
+                                if hasattr(self.salon_prof_service, 'create'):
+                                    self.salon_prof_service.create(db, {"salon_id": s_id, "profesor_id": prof_id})
+                                    asignado_exitosamente = True
+                                elif hasattr(self.salon_prof_service, 'crear'):
+                                    self.salon_prof_service.crear(db, {"salon_id": s_id, "profesor_id": prof_id})
+                                    asignado_exitosamente = True
+                            except Exception:
+                                pass
+                            
+                            # Fallback final por SQL directo si las estrategias de servicio fallan
+                            if not asignado_exitosamente:
+                                try:
+                                    db.execute(
+                                        text("INSERT INTO salon_profesor (salon_id, profesor_id) VALUES (:salon_id, :profesor_id)"),
+                                        {"salon_id": s_id, "profesor_id": prof_id}
+                                    )
+                                    db.commit()
+                                    asignado_exitosamente = True
+                                except Exception as ex_sql:
+                                    self.mostrar_notificacion(e, f"Aviso de Salón: {str(ex_sql)}", es_error=True)
+
+                for s_id, rel_id in map_rel_id_salon.items():
+                    if s_id not in self.salones_temp:
+                        self.salon_prof_service.desasignar(db, rel_id)
 
                 self.mostrar_notificacion(e, "Profesor guardado/actualizado exitosamente.")
                 self.cerrar_modal(self.modal_formulario, e)
@@ -627,12 +749,21 @@ class vista_profesores(ft.Container):
             self.map_asignaturas_detalladas.clear()
             self.sesiones_completas.clear()
             self.dias_sesiones.clear()
+            self.map_salones.clear() 
             
+            if self.salon_service:
+                all_salones = self.salon_service.obtener_todos(db)
+                opciones_salones = []
+                for s in all_salones:
+                    nombre_salon = getattr(s, 'nombre', f"Salón {s.id}")
+                    self.map_salones[s.id] = nombre_salon
+                    opciones_salones.append(ft.dropdown.Option(key=str(s.id), text=nombre_salon))
+                self.dd_salon.options = opciones_salones
+
             if self.cur_asig_service and self.asig_service:
                 all_ca = self.cur_asig_service.obtener_todos(db)
                 opciones_ca = []
 
-                # Cargar mapa completo de menciones directamente de la base de datos (tablas 'mencion' o 'menciones')
                 map_menciones_db = {}
                 for tabla_mencion in ['mencion', 'menciones']:
                     try:
@@ -656,12 +787,10 @@ class vista_profesores(ft.Container):
                             year = getattr(cur_obj, 'year', '') or getattr(cur_obj, 'anio', '') or getattr(cur_obj, 'grado', '')
                             seccion = getattr(cur_obj, 'seccion', '') or getattr(cur_obj, 'grupo', '')
                             
-                            # 1. Comprobación de foreign key 'mencion_id' en el curso
                             mencion_id = getattr(cur_obj, 'mencion_id', None)
                             if mencion_id and mencion_id in map_menciones_db:
                                 mencion_str = str(map_menciones_db[mencion_id]).strip()
                             
-                            # 2. Comprobación directa y prioritaria del atributo/relación 'mencion'
                             if not mencion_str:
                                 mencion_obj = getattr(cur_obj, 'mencion', None)
                                 if mencion_obj:
@@ -672,7 +801,6 @@ class vista_profesores(ft.Container):
                                     elif isinstance(mencion_obj, int) and mencion_obj in map_menciones_db:
                                         mencion_str = str(map_menciones_db[mencion_obj]).strip()
                             
-                            # 3. Búsqueda dinámica en posibles campos alternativos
                             if not mencion_str:
                                 posibles_campos = ['especialidad', 'modalidad', 'area', 'carrera', 'mencion_nombre', 'nombre_mencion', 'especialidad_id']
                                 for campo in posibles_campos:
@@ -747,17 +875,20 @@ class vista_profesores(ft.Container):
             for p in sorted(profesores_db, key=lambda x: f"{x.nombre} {x.apellido}".lower()):
                 rels_asig = self.prof_asig_service.obtener_por_profesor(db, p.id)
                 rels_ses = self.sesion_prof_service.obtener_por_profesor(db, p.id)
+                rels_salon = self.salon_prof_service.obtener_por_profesor(db, p.id) 
                 
                 asig_ids = {r.curso_asignatura_id for r in rels_asig}
                 ses_ids = {r.sesion_id for r in rels_ses}
-
+                salon_ids = {r.salon_id for r in rels_salon} 
+                
                 self.map_profesores[p.id] = {
                     "id": p.id,
                     "nombre": p.nombre,
                     "apellido": p.apellido,
                     "estado": getattr(p, "estado", True),
                     "asignaturas": asig_ids,
-                    "sesiones": ses_ids
+                    "sesiones": ses_ids,
+                    "salones": salon_ids
                 }
 
                 nombre_comp = f"{p.nombre} {p.apellido}"

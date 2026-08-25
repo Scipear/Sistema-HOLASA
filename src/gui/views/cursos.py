@@ -4,6 +4,8 @@ from src.services.curso_service import CursoService
 from src.services.curso_asignatura_service import CursoAsignaturaService
 from src.services.mencion_service import MencionService
 from src.services.asignatura_service import AsignaturaService
+from src.services.salon_service import SalonService
+from src.services.salon_curso_service import SalonCursoService
 
 OPCIONES_YEARS = ["1ro", "2do", "3ro", "4to", "5to", "6to"]
 OPCIONES_SECCIONES = ["A", "B", "C", "D"]
@@ -27,6 +29,8 @@ def vista_cursos():
     curso_asig_service = CursoAsignaturaService()
     mencion_service = MencionService()
     asig_service = AsignaturaService()
+    salon_service = SalonService()
+    salon_curso_service = SalonCursoService()
 
     estilo_tarjeta_oscura = {
         "bgcolor": "#1E202D",
@@ -91,6 +95,14 @@ def vista_cursos():
         **estilo_input
     )
 
+    dd_salon = ft.Dropdown(
+        label="Aula / Salón",
+        **estilo_input,
+        expand=True
+    )
+
+    lista_chips_salon = ft.Column(spacing=8, scroll=ft.ScrollMode.AUTO)
+
     def on_asignatura_change(e):
         container_nueva_asig.visible = dd_asignatura.value == "__nueva__"
         if not container_nueva_asig.visible:
@@ -153,9 +165,11 @@ def vista_cursos():
 
     # Estado Local en Memoria
     asignaturas_temp = []
+    salones_temp = []
     map_menciones = {}
     map_menciones_orden = {}
     map_asignaturas = {}
+    map_salones = {}
     map_cursos = {}
 
     # =========================================================================
@@ -170,6 +184,53 @@ def vista_cursos():
         page.snack_bar = snack
         snack.open = True
         page.update()
+
+    def refrescar_chips_salon():
+        lista_chips_salon.controls.clear()
+        for salon in salones_temp:
+            lista_chips_salon.controls.append(
+                ft.Container(
+                    bgcolor="#2A2D3E", border=ft.border.all(1, "#5A5D70"), border_radius=10,
+                    padding=ft.padding.symmetric(horizontal=12, vertical=8),
+                    content=ft.Row([
+                        ft.Text(salon["nombre"], color=ft.colors.WHITE, size=13, weight=ft.FontWeight.BOLD, expand=True),
+                        ft.IconButton(
+                            ft.icons.CLOSE, icon_color="#A0A0B0", icon_size=14,
+                            on_click=lambda e, s=salon: quitar_salon(e, s), width=20, height=20
+                        )
+                    ])
+                )
+            )
+
+    def quitar_salon(e, salon):
+        if salon in salones_temp:
+            salones_temp.remove(salon)
+            refrescar_chips_salon()
+            lista_chips_salon.update()
+
+    def agregar_salon(e):
+        salon_id_str = dd_salon.value
+        if not salon_id_str:
+            mostrar_notificacion(e.page, "Seleccione un aula para agregar.", es_error=True)
+            return
+        
+        encontrado = map_salones.get(int(salon_id_str))
+        if not encontrado:
+            return
+        
+        if any(str(s.get("salon_id")) == str(encontrado["id"]) for s in salones_temp):
+            mostrar_notificacion(e.page, "El aula ya está agregada al curso.", es_error=True)
+            return
+            
+        salones_temp.append({
+            "salon_id": encontrado["id"],
+            "nombre": encontrado["nombre"]
+        })
+
+        dd_salon.value = None
+        refrescar_chips_salon()
+        dd_salon.update()
+        lista_chips_salon.update()
 
     def refrescar_chips_asig():
         lista_chips_asig.controls.clear()
@@ -260,7 +321,9 @@ def vista_cursos():
 
     def cerrar_modal_formulario(e):
         asignaturas_temp.clear()
+        salones_temp.clear()
         refrescar_chips_asig()
+        refrescar_chips_salon()
         modal_formulario.open = False
         e.page.update()
 
@@ -282,7 +345,6 @@ def vista_cursos():
                 mostrar_notificacion(e.page, "Debe ingresar el nombre de la nueva mención.", es_error=True)
                 return
 
-        # VALIDACIÓN: Exigir al menos una asignatura registrada
         if not asignaturas_temp:
             mostrar_notificacion(e.page, "Debe registrar al menos una asignatura para el curso.", es_error=True)
             return
@@ -341,10 +403,11 @@ def vista_cursos():
                         "horas": asig["horas"]
                     })
 
+                salones_procesados = [s["salon_id"] for s in salones_temp]
+
                 if id_actual.value == "":
                     nuevo_curso = curso_service.crear(db, seccion=dd_seccion.value, year=dd_year.value, mencion_id=mencion_id)
                     
-                    # Limpieza preventiva por si SQLite recicla un ID con datos huérfanos previos
                     rels_antiguas = curso_asig_service.obtener_por_curso(db, nuevo_curso.id)
                     for rel in rels_antiguas:
                         curso_asig_service.eliminar(db, rel.id)
@@ -352,6 +415,13 @@ def vista_cursos():
                     for asig in asignaturas_procesadas:
                         curso_asig_service.crear(db, curso_id=nuevo_curso.id, asignatura_id=asig["asignatura_id"], horas_semanales=asig["horas"])
                     
+                    rels_antiguas_salones = salon_curso_service.obtener_por_curso(db, nuevo_curso.id)
+                    for rel in rels_antiguas_salones:
+                        salon_curso_service.desasignar(db, rel.id)
+
+                    for salon_id in salones_procesados:
+                        salon_curso_service.asignar(db, salon_id=salon_id, curso_id=nuevo_curso.id)
+
                     mostrar_notificacion(e.page, "Curso registrado exitosamente.")
                 else:
                     curso_id = int(id_actual.value)
@@ -370,10 +440,23 @@ def vista_cursos():
                             curso_asig_service.actualizar(db, ids_actuales_asig[asig_id].id, horas_semanales=asig["horas"])
                         else:
                             curso_asig_service.crear(db, curso_id=curso_id, asignatura_id=asig_id, horas_semanales=asig["horas"])
-                    
+
+                    rels_actuales_salones = salon_curso_service.obtener_por_curso(db, curso_id)
+                    ids_actuales_salones = {r.salon_id: r for r in rels_actuales_salones}
+                    ids_nuevos_salones_set = set(salones_procesados)
+
+                    for salon_id, rel in ids_actuales_salones.items():
+                        if salon_id not in ids_nuevos_salones_set:
+                            salon_curso_service.desasignar(db, rel.id)
+
+                    for salon_id in salones_procesados:
+                        if salon_id not in ids_actuales_salones:
+                            salon_curso_service.asignar(db, salon_id=salon_id, curso_id=curso_id)
+
                     mostrar_notificacion(e.page, "Curso actualizado exitosamente.")
 
                 asignaturas_temp.clear()
+                salones_temp.clear()
                 cargar_datos(e.page)
                 
             except ValueError as ve:
@@ -435,6 +518,19 @@ def vista_cursos():
 
             cursos_visibles += 1
             total_asig += len(cur.get("asignaturas", []))
+            
+            chips_salones = ft.Row(wrap=True, spacing=5)
+            for salon in cur.get("salones", []):
+                chips_salones.controls.append(
+                    ft.Container(
+                        content=ft.Text(f"{salon['nombre']}", size=10, color="#5B9BD5"),
+                        bgcolor="#1A2B3C",
+                        border=ft.border.all(1, "#3B6B9C"),
+                        padding=ft.padding.symmetric(horizontal=8, vertical=3),
+                        border_radius=8
+                    )
+                )
+
             chips_asig = ft.Row(wrap=True, spacing=5)
             for asig in cur.get("asignaturas", []):
                 chips_asig.controls.append(
@@ -470,6 +566,9 @@ def vista_cursos():
                     ft.Container(
                         padding=ft.padding.symmetric(horizontal=14, vertical=12),
                         content=ft.Column([
+                            ft.Text("Aulas:", color="#A0A0B0", size=11, weight=ft.FontWeight.BOLD),
+                            chips_salones if chips_salones.controls else ft.Text("Sin aulas asignadas", color="#5A5D70", size=11),
+                            ft.Container(height=4),
                             ft.Text("Asignaturas:", color="#A0A0B0", size=11, weight=ft.FontWeight.BOLD),
                             chips_asig if chips_asig.controls else ft.Text("Sin asignaturas", color="#5A5D70", size=11),
                             ft.Container(height=6),
@@ -532,6 +631,34 @@ def vista_cursos():
                 
                 ft.Divider(color="#303346", height=10),
 
+                ft.Row([
+                    dd_salon,
+                    ft.ElevatedButton(
+                        "Agregar Aula",
+                        icon=ft.icons.ADD,
+                        bgcolor="#439A5D",
+                        color=ft.colors.WHITE,
+                        on_click=agregar_salon,
+                        height=52,
+                        style=ft.ButtonStyle(
+                            shape=ft.RoundedRectangleBorder(radius=10),
+                            padding=ft.padding.symmetric(horizontal=20)
+                        )
+                    )
+                ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+
+                ft.Container(
+                    content=lista_chips_salon,
+                    height=100,
+                    bgcolor="#13141C",
+                    border=ft.border.all(1, "#303346"),
+                    border_radius=10,
+                    padding=10,
+                    clip_behavior=ft.ClipBehavior.ANTI_ALIAS
+                ),
+
+                ft.Divider(color="#303346", height=10),
+
                 dd_asignatura,
                 container_nueva_asig,
 
@@ -553,7 +680,7 @@ def vista_cursos():
                 
                 ft.Container(
                     content=lista_chips_asig,
-                    height=200,
+                    height=180,
                     bgcolor="#13141C",
                     border=ft.border.all(1, "#303346"),
                     border_radius=10,
@@ -575,7 +702,9 @@ def vista_cursos():
 
     def abrir_modal_crear(e):
         asignaturas_temp.clear()
+        salones_temp.clear()
         refrescar_chips_asig()
+        refrescar_chips_salon()
         
         id_actual.value = ""
         dd_year.value = "1ro"
@@ -583,6 +712,7 @@ def vista_cursos():
         dd_mencion.value = dd_mencion.options[0].key if dd_mencion.options else None
         txt_nueva_mencion.value = ""
         txt_nueva_mencion.visible = False
+        dd_salon.value = None
         dd_asignatura.value = None
         txt_nombre_nueva_asig.value = ""
         if dd_tipo_nueva_asig.options:
@@ -596,6 +726,7 @@ def vista_cursos():
 
     def abrir_modal_editar(cur_id, e):
         asignaturas_temp.clear()
+        salones_temp.clear()
         
         cur_dict = map_cursos.get(cur_id)
         if not cur_dict:
@@ -612,6 +743,7 @@ def vista_cursos():
         txt_nueva_mencion.value = ""
         txt_nueva_mencion.visible = False
 
+        dd_salon.value = None
         dd_asignatura.value = None
         txt_nombre_nueva_asig.value = ""
         if dd_tipo_nueva_asig.options:
@@ -619,6 +751,12 @@ def vista_cursos():
         container_nueva_asig.visible = False
         
         dd_horas_asig.value = None
+
+        for salon_data in cur_dict.get("salones", []):
+            salones_temp.append({
+                "salon_id": salon_data["salon_id"],
+                "nombre": salon_data["nombre"]
+            })
 
         for asig_data in cur_dict.get("asignaturas", []):
             asignaturas_temp.append({
@@ -630,6 +768,7 @@ def vista_cursos():
                 "es_nueva": False
             })
         
+        refrescar_chips_salon()
         refrescar_chips_asig()
         
         e.page.dialog = modal_formulario
@@ -653,6 +792,19 @@ def vista_cursos():
                         "codigo": getattr(m, "codigo", getattr(m, "siglas", ""))
                     }
                     map_menciones_orden[m.id] = idx
+
+                salones_db = salon_service.obtener_todos(db)
+                map_salones.clear()
+                for s in salones_db:
+                    map_salones[s.id] = {
+                        "id": s.id,
+                        "nombre": getattr(s, "nombre", getattr(s, "codigo", f"Salón {s.id}"))
+                    }
+
+                opciones_form_salon = []
+                for s in map_salones.values():
+                    opciones_form_salon.append(ft.dropdown.Option(text=s["nombre"], key=str(s["id"])))
+                dd_salon.options = opciones_form_salon
 
                 asignaturas_db = asig_service.obtener_todos(db)
                 map_asignaturas.clear()
@@ -702,6 +854,16 @@ def vista_cursos():
                     m_nombre = mencion_info["nombre"] if mencion_info else "General"
                     m_codigo = mencion_info["codigo"] if mencion_info else ""
 
+                    rels_salones = salon_curso_service.obtener_por_curso(db, c.id)
+                    salon_list = []
+                    for r in rels_salones:
+                        salon_obj = map_salones.get(r.salon_id)
+                        if salon_obj:
+                            salon_list.append({
+                                "salon_id": r.salon_id,
+                                "nombre": salon_obj["nombre"]
+                            })
+
                     rels = curso_asig_service.obtener_por_curso(db, c.id)
                     asig_list = []
                     for r in rels:
@@ -721,6 +883,7 @@ def vista_cursos():
                         "mencion": m_nombre,
                         "codigo_mencion": m_codigo,
                         "mencion_id": c.mencion_id,
+                        "salones": salon_list,
                         "asignaturas": asig_list
                     }
 

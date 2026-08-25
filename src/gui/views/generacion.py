@@ -7,10 +7,14 @@ try:
     from src.engine import genetics
     from src.export.pdf_exporter import export_all
     from src.export.teacher_pdf_exporter import export_all_teachers
+    from src.export.excel_exporter import export_all_excel
+    from src.export.teacher_excel_exporter import export_all_teachers_excel
 except ImportError:
     genetics = None
     export_all = None
     export_all_teachers = None
+    export_all_excel = None
+    export_all_teachers_excel = None
 
 
 def vista_generacion():
@@ -291,11 +295,11 @@ def vista_generacion():
 
         if button_triggered:
             button_triggered.disabled = True
-            button_triggered.text = "Exportando PDF..."
+            button_triggered.text = "Exportando horarios..."
             button_triggered.update()
 
         btn_exportar.disabled = True
-        btn_exportar.text = "Exportando PDF..."
+        btn_exportar.text = "Exportando horarios..."
         page.update()
 
         try:
@@ -314,6 +318,22 @@ def vista_generacion():
                     export_all_teachers(
                         timetable=best_timetable,
                         output_dir=output_dir,
+                        year_label=dd_anio.value
+                    )
+
+                if export_all_excel is not None:
+                    excel_dir = os.path.join(output_dir, "excel")
+                    export_all_excel(
+                        timetable=best_timetable,
+                        output_dir=excel_dir,
+                        year_label=dd_anio.value
+                    )
+
+                if export_all_teachers_excel is not None:
+                    excel_dir = os.path.join(output_dir, "excel")
+                    export_all_teachers_excel(
+                        timetable=best_timetable,
+                        output_dir=excel_dir,
                         year_label=dd_anio.value
                     )
 
@@ -622,8 +642,8 @@ def vista_generacion():
         items_reporte.append(helper_seccion("Materias Repetidas el Mismo Día", report.get("subject_duplications", []), fmt_rep, ft.icons.REPEAT_ROUNDED))
 
         btn_si_exportar = ft.ElevatedButton(
-            "Sí, Exportar a PDF",
-            icon=ft.icons.PICTURE_AS_PDF_ROUNDED,
+            "Sí, Exportar",
+            icon=ft.icons.DOWNLOAD_ROUNDED,
             bgcolor="#439A5D", color=ft.colors.WHITE, height=42
         )
         btn_si_exportar.on_click = lambda e: _abrir_selector_carpeta(page, button_triggered=e.control)
@@ -639,7 +659,7 @@ def vista_generacion():
             bgcolor="#13141C", border_radius=10, padding=15,
             border=ft.border.all(1, "#303346"),
             content=ft.Column([
-                ft.Text("¿Desea exportar este horario a PDF?", size=14, weight=ft.FontWeight.BOLD, color=ft.colors.WHITE),
+                ft.Text("¿Desea exportar este horario?", size=14, weight=ft.FontWeight.BOLD, color=ft.colors.WHITE),
                 ft.Row([btn_si_exportar, btn_no_descartar], spacing=10)
             ], spacing=10)
         )

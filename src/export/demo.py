@@ -6,11 +6,13 @@ Uso:
     python src/export/demo.py --generations 200 --output-dir data/export
     python src/export/demo.py --excel        # exporta también workbooks .xlsx
 
-Con --excel se generan además los horarios en formato Excel: un workbook por
-año (una hoja por curso) y el horario de cada profesor dentro de la subcarpeta
-Horarios_Profesores/, siempre sobre el mismo horario generado.
+Con --excel se generan además los horarios en formato Excel, separados de los
+PDF: un workbook por año (una hoja por curso) en <output-dir>/excel/ y el
+horario de cada profesor dentro de <output-dir>/excel/Horarios_Profesores/,
+siempre sobre el mismo horario generado.
 """
 import argparse
+import os
 
 
 def _print_created(created: list[str]) -> None:
@@ -37,9 +39,10 @@ def main() -> None:
         from src.export.teacher_excel_exporter import export_all_teachers_excel
 
         def extra_exporter(timetable, output_dir, year_label):
+            excel_dir = os.path.join(output_dir, "excel")
             return (
-                export_all_excel(timetable, output_dir, year_label=year_label)
-                + export_all_teachers_excel(timetable, output_dir, year_label=year_label)
+                export_all_excel(timetable, excel_dir, year_label=year_label)
+                + export_all_teachers_excel(timetable, excel_dir, year_label=year_label)
             )
 
     if args.genetics:

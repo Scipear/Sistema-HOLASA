@@ -7,12 +7,10 @@ from src.gui.views.sesiones import vista_sesiones
 from src.gui.views.salones import vista_salones
 from src.gui.views.cursos import vista_cursos
 from src.gui.views.generacion import vista_generacion
-from src.gui.views.horario import vista_horario
 
 NAV_ITEMS = [
     {"id": "dashboard",  "label": "Dashboard",    "icono": ft.icons.DASHBOARD_OUTLINED,     "icono_sel": ft.icons.DASHBOARD},
     {"id": "generacion", "label": "Generar",      "icono": ft.icons.AUTO_FIX_HIGH,          "icono_sel": ft.icons.AUTO_FIX_HIGH},
-    {"id": "horario",    "label": "Horario",       "icono": ft.icons.CALENDAR_TODAY_OUTLINED,"icono_sel": ft.icons.CALENDAR_TODAY},
     None,
     {"id": "profesores", "label": "Profesores",   "icono": ft.icons.PEOPLE_OUTLINE,         "icono_sel": ft.icons.PEOPLE},
     {"id": "cursos",     "label": "Cursos",        "icono": ft.icons.CLASS_,                 "icono_sel": ft.icons.CLASS_},
@@ -87,8 +85,6 @@ def main(page: ft.Page):
             return vista_cursos()
         elif vista_id == "generacion":
             return vista_generacion()
-        elif vista_id == "horario":
-            return vista_horario()
         return ft.Text("Vista no encontrada", color=ft.colors.WHITE)
 
     def cambiar_vista_simple(vista_id):
@@ -130,7 +126,7 @@ def main(page: ft.Page):
                 padding=16,
                 content=ft.Column([
                     ft.Text("Realizado en: 2026", color="#5A5D70", size=10),
-                    ft.Text("E.T.I Fundación La Salle", color="#5A5D70", size=10),
+                    ft.Text("E.T.I. Fundación La Salle", color="#5A5D70", size=10),
                 ], spacing=2)
             )
         ], spacing=0, expand=True)

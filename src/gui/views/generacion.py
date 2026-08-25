@@ -28,8 +28,26 @@ def vista_generacion():
         "exportando": False,
         "detener": False,
         "best_timetable": None,
-        "final_report": None
+        "final_report": None,
+        "_pending_export_button": None,
     }
+
+    # ── FilePicker para seleccionar carpeta de exportación ──────────
+    def _on_directory_picked(e: ft.FilePickerResultEvent):
+        """Callback cuando el usuario selecciona (o cancela) la carpeta."""
+        button_triggered = estado_ref.get("_pending_export_button")
+        page = e.page if hasattr(e, 'page') else e.control.page
+
+        # Si el usuario canceló o cerró la ventana sin elegir
+        if not e.path:
+            if button_triggered:
+                button_triggered.disabled = False
+                button_triggered.update()
+            return
+        
+        ejecutar_exportacion(page, output_dir=e.path, button_triggered=button_triggered)
+
+    file_picker = ft.FilePicker(on_result=_on_directory_picked)
 
     progreso_bar = ft.ProgressBar(
         value=0, bgcolor="#1A1C28", color="#439A5D", height=6, visible=False
@@ -244,7 +262,28 @@ def vista_generacion():
         txt_progreso.visible = False
         page.update()
 
-    def ejecutar_exportacion(page, button_triggered=None):
+    def _abrir_selector_carpeta(page, button_triggered=None):
+        """Abre el diálogo nativo de selección de carpeta antes de exportar."""
+        if estado_ref.get("exportando"):
+            return
+
+        # AQUÍ ESTÁ LA CLAVE: Agregar file_picker a page.overlay si aún no está añadido
+        if file_picker not in page.overlay:
+            page.overlay.append(file_picker)
+            page.update()
+
+        estado_ref["_pending_export_button"] = button_triggered
+
+        if button_triggered:
+            button_triggered.disabled = True
+            button_triggered.update()
+
+        # Ahora sí se puede llamar de forma segura
+        file_picker.get_directory_path(
+            dialog_title="Seleccionar carpeta para exportar horarios"
+        )
+
+    def ejecutar_exportacion(page, output_dir="data/export", button_triggered=None):
         if estado_ref.get("exportando"):
             return
         
@@ -253,24 +292,28 @@ def vista_generacion():
         if button_triggered:
             button_triggered.disabled = True
             button_triggered.text = "Exportando PDF..."
+            button_triggered.update()
+
         btn_exportar.disabled = True
         btn_exportar.text = "Exportando PDF..."
         page.update()
 
         try:
+            os.makedirs(output_dir, exist_ok=True)
+
             best_timetable = estado_ref.get("best_timetable")
             if best_timetable is not None:
                 if export_all is not None:
                     export_all(
                         timetable=best_timetable,
-                        output_dir="data/export",
+                        output_dir=output_dir,
                         year_label=dd_anio.value
                     )
 
                 if export_all_teachers is not None:
                     export_all_teachers(
                         timetable=best_timetable,
-                        output_dir="data/export",
+                        output_dir=output_dir,
                         year_label=dd_anio.value
                     )
 
@@ -279,11 +322,26 @@ def vista_generacion():
             page.snack_bar = ft.SnackBar(
                 ft.Row([
                     ft.Icon(ft.icons.CHECK_CIRCLE, color="#439A5D"),
-                    ft.Text("Horarios exportados exitosamente en 'data/export'", color=ft.colors.WHITE)
+                    ft.Text(f"Horarios exportados exitosamente en '{output_dir}'", color=ft.colors.WHITE)
                 ]),
                 bgcolor="#1A2A20"
             )
             page.snack_bar.open = True
+        except Exception as ex:
+            page.snack_bar = ft.SnackBar(
+                ft.Row(
+                    [
+                        ft.Icon(ft.icons.ERROR_OUTLINE, color="#FF6B6B"),
+                        ft.Text(
+                            f"Error durante la exportación: {str(ex)}",
+                            color=ft.colors.WHITE,
+                        ),
+                    ]
+                ),
+                bgcolor="#3A1C1C",
+            )
+            page.snack_bar.open = True
+
         finally:
             estado_ref["exportando"] = False
             
@@ -568,7 +626,7 @@ def vista_generacion():
             icon=ft.icons.PICTURE_AS_PDF_ROUNDED,
             bgcolor="#439A5D", color=ft.colors.WHITE, height=42
         )
-        btn_si_exportar.on_click = lambda e: ejecutar_exportacion(page, button_triggered=e.control)
+        btn_si_exportar.on_click = lambda e: _abrir_selector_carpeta(page, button_triggered=e.control)
 
         btn_no_descartar = ft.OutlinedButton(
             "No, Descartar",
@@ -747,7 +805,7 @@ def vista_generacion():
         e.page.update()
 
     def exportar(e):
-        ejecutar_exportacion(e.page, button_triggered=e.control)
+        _abrir_selector_carpeta(e.page, button_triggered=e.control)
 
     btn_generar.on_click = iniciar_generacion
     btn_detener.on_click = detener
@@ -828,8 +886,17 @@ def vista_generacion():
         ], spacing=12)
     )
 
-    return ft.Container(
+    # El FilePicker debe registrarse como overlay en la página.
+    # Retornamos un contenedor que, al montarse, agrega el overlay.
+    def _on_view_mount(e):
+        page = e.page if hasattr(e, 'page') else e.control.page
+        if page and file_picker not in (page.overlay or []):
+            page.overlay.append(file_picker)
+            page.update()
+
+    main_container = ft.Container(
         padding=20, expand=True,
+        on_click=None,
         content=ft.Column(
             controls=[
                 ft.Row(
@@ -859,6 +926,12 @@ def vista_generacion():
                     ]
                 )
             ],
-            expand=True
+            expand=True,
+            on_scroll_interval=0,
         )
     )
+
+    # Registrar el file_picker en la página a través del did_mount del contenedor
+    main_container.did_mount = _on_view_mount
+
+    return main_container

@@ -7,7 +7,7 @@ from src.services.asignatura_service import AsignaturaService
 from src.services.salon_service import SalonService
 from src.services.salon_curso_service import SalonCursoService
 
-OPCIONES_YEARS = ["1ro", "2do", "3ro", "4to", "5to", "6to"]
+OPCIONES_YEARS = ["1", "2", "3", "4", "5", "6"]
 OPCIONES_SECCIONES = ["A", "B", "C", "D"]
 
 def normalizar_year(val) -> str:

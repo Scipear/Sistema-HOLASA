@@ -28,6 +28,35 @@ GLOBAL_BLOCKED_HOURS = {
     39,
 }
 
+def reload_data():
+    """Recarga todos los datos desde la BD, actualizando las variables globales del motor.
+    Llamar antes de cada generación para que los cambios hechos en la interfaz
+    (añadir/editar/eliminar profesores, cursos, salones, etc.) sean tomados en cuenta.
+    """
+    global data_handler, academic_hours_limits, academic_hours, teachers, groups, rooms, subjects
+    global TEACHERS_BY_ID, SUBJECTS_BY_ID, GROUPS_BY_ID
+    global SORTED_DAYS, DAY_POSITIONS
+
+    data_handler = Data()
+    data_handler.load_data()
+
+    academic_hours_limits = data_handler.academic_hours_limits
+    academic_hours = data_handler.academic_hours
+    teachers = data_handler.teachers
+    groups = data_handler.groups
+    rooms = data_handler.rooms
+    subjects = data_handler.subjects
+
+    TEACHERS_BY_ID = {t.id: t for t in teachers}
+    SUBJECTS_BY_ID = {s.id: s for s in subjects}
+    GROUPS_BY_ID = {g.id: g for g in groups}
+
+    SORTED_DAYS = sorted(academic_hours_limits.keys())
+    DAY_POSITIONS = {day: i for i, day in enumerate(SORTED_DAYS)}
+
+    print(f"↻ Datos recargados desde BD: {len(teachers)} profesores, {len(groups)} cursos, {len(rooms)} salones.")
+
+
 # Configuración dinámica de horas de Actividad Complementaria por año
 _COMPLEMENTARY_CONFIG = None
 

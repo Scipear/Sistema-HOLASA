@@ -674,6 +674,12 @@ def vista_generacion():
             return
 
         try:
+            # ── Recargar datos desde BD para capturar cualquier cambio hecho en la interfaz ──
+            if genetics and hasattr(genetics, 'reload_data'):
+                txt_progreso.value = "Cargando datos actualizados desde la base de datos..."
+                page.update()
+                genetics.reload_data()
+
             # Leer config de actividad complementaria desde la UI
             comp_config = _leer_comp_config()
             if genetics and hasattr(genetics, 'set_complementary_config') and comp_config:

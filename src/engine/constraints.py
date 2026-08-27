@@ -2,18 +2,25 @@ from __future__ import annotations
 from src.engine.classes import Event
 
 
-def fitness(population: list[list[Event]], academic_hours: list[Academic_Hour], academic_hours_limits: dict):
+def fitness(
+    population: list[list[Event]],
+    academic_hours: list[Academic_Hour] = None,
+    academic_hours_limits: dict = None,
+    groups_by_id: dict = None,
+    subjects_by_id: dict = None
+):
     results = []
     
     for individual in population:
         # Extraemos solo el score numérico desestimando las listas de fallas con ', _'
         g_score, _ = groups_subjects(individual)
         t_score, _ = teachers_subjects(individual)
-        r_score, _ = rooms_groups(individual) # Esta quedó igual que antes
-        gap_score, _ = groups_gaps(individual, academic_hours, academic_hours_limits)
-        sub_score, _ = subject_day(individual, academic_hours)
+        r_score, _ = rooms_groups(individual)
+        gap_score, _ = groups_gaps(individual, academic_hours, academic_hours_limits) if academic_hours and academic_hours_limits else (0, [])
+        sub_score, _ = subject_day(individual, academic_hours) if academic_hours else (0, [])
+        fri_score, _ = friday_distribution_constraints(individual, academic_hours, academic_hours_limits, groups_by_id, subjects_by_id) if academic_hours and academic_hours_limits else (0, [])
         
-        total_score = g_score + t_score + r_score + gap_score + sub_score
+        total_score = g_score + t_score + r_score + gap_score + sub_score + fri_score
         results.append(total_score)
 
     return results
@@ -33,7 +40,7 @@ def groups_subjects(individual: list[Event]):
 
             if key in groups_occupation:
                 existing_event = groups_occupation[key]
-                score += 1250
+                score += 1800
                 collisions.append({
                     "group": event.group,
                     "block": block,
@@ -243,3 +250,117 @@ def subject_day(individual: list[Event], academic_hours: list[Academic_Hour]):
             group_day_subjects[event.group][day][event.subject] = event.id
 
     return score, subject_duplications
+
+
+def friday_distribution_constraints(
+    individual: list[Event],
+    academic_hours: list[Academic_Hour],
+    academic_hours_limits: dict,
+    groups_by_id: dict = None,
+    subjects_by_id: dict = None
+):
+    """
+    Evalúa las reglas específicas para la distribución horaria de los Viernes:
+    1. 1er y 2do año: En lo posible ven clases los viernes como máximo hasta el bloque de 12:10 a 12:50 (rel <= 7).
+    2. Talleres los viernes:
+       - Para todos los años excepto 4to y 5to, deben finalizar como máximo a las 12:50 (rel <= 7).
+       - En las horas de la tarde del viernes (rel >= 8) es preferible cualquier otra clase menos Taller.
+       - Para 4to y 5to año, la duración (10h) requiere la jornada completa, pero se fomenta colocarlos otros días si cabe.
+    3. Minimizar la cantidad total de secciones que ven Taller los viernes.
+    """
+    if not academic_hours or not academic_hours_limits:
+        return 0, []
+
+    # Localizar el índice del día Viernes
+    friday_day_index = next(
+        (ah.day_index for ah in academic_hours if ah.day and ah.day.lower().startswith("vier")),
+        4
+    )
+    if friday_day_index not in academic_hours_limits:
+        return 0, []
+
+    min_friday_block = academic_hours_limits[friday_day_index]["min"]
+
+    # Fallback para obtener metadatos de grupos y materias si no fueron pasados
+    if groups_by_id is None or subjects_by_id is None:
+        try:
+            from src.engine import genetics
+            groups_by_id = groups_by_id or getattr(genetics, 'GROUPS_BY_ID', {})
+            subjects_by_id = subjects_by_id or getattr(genetics, 'SUBJECTS_BY_ID', {})
+        except Exception:
+            groups_by_id = groups_by_id or {}
+            subjects_by_id = subjects_by_id or {}
+
+    score = 0
+    friday_report = []
+    friday_taller_groups = set()
+
+    for event in individual:
+        if event.start_hour is None:
+            continue
+
+        start_ah = academic_hours[event.start_hour]
+        if start_ah.day_index != friday_day_index:
+            continue
+
+        grp = groups_by_id.get(event.group)
+        grp_year = getattr(grp, 'year', None)
+
+        subj = subjects_by_id.get(event.subject)
+        s_type = (getattr(subj, 'subject_type', '') or '').lower()
+        s_name = (getattr(subj, 'name', '') or '').lower()
+        is_taller = "taller" in s_type or "taller" in s_name
+
+        event_blocks = range(event.start_hour, event.start_hour + event.duration)
+        afternoon_blocks = [b for b in event_blocks if (b - min_friday_block) >= 8]  # >= 12:50 PM
+
+        # --- REGLA 1: 1ero y 2do año hasta las 12:50 los viernes ---
+        if grp_year in (1, 2) and afternoon_blocks:
+            penalty = len(afternoon_blocks) * 600
+            score += penalty
+            friday_report.append({
+                "group": event.group,
+                "day": friday_day_index,
+                "type": "1er/2do año con clases el viernes después de 12:50",
+                "afternoon_hours": [academic_hours[b].start_hour for b in afternoon_blocks],
+                "penalty": penalty,
+                "event_id": event.id,
+                "subject": event.subject
+            })
+
+        # --- REGLA 2: Talleres los viernes en la tarde ---
+        if is_taller:
+            friday_taller_groups.add(event.group)
+            
+            if afternoon_blocks:
+                if grp_year not in (4, 5):
+                    # Para 1°, 2°, 3° y 6° año, el taller no debe estar en la tarde de los viernes
+                    taller_aft_penalty = len(afternoon_blocks) * 1500
+                    score += taller_aft_penalty
+                    friday_report.append({
+                        "group": event.group,
+                        "day": friday_day_index,
+                        "type": f"Taller ({getattr(subj, 'name', 'Taller')}) en la tarde del viernes (Año {grp_year} debe terminar máx 12:50)",
+                        "afternoon_hours": [academic_hours[b].start_hour for b in afternoon_blocks],
+                        "penalty": taller_aft_penalty,
+                        "event_id": event.id,
+                        "subject": event.subject
+                    })
+                else:
+                    # Para 4to y 5to año es aceptable si su duración es de 10h, penalización suave de preferencia
+                    mild_penalty = len(afternoon_blocks) * 150
+                    score += mild_penalty
+
+    # --- REGLA 3: Minimizar cantidad de secciones con Taller los viernes ---
+    if friday_taller_groups:
+        taller_groups_penalty = len(friday_taller_groups) * 450
+        score += taller_groups_penalty
+        for g_id in friday_taller_groups:
+            friday_report.append({
+                "group": g_id,
+                "day": friday_day_index,
+                "type": "Sección con Taller programado el día Viernes",
+                "penalty": 450
+            })
+
+    return score, friday_report

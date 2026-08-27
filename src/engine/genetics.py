@@ -3,7 +3,7 @@ import random
 import copy
 import time
 from src.engine.classes import Teacher, Subject, Academic_Hour, Room, Group, Event, Availability
-from src.engine.constraints import fitness, groups_subjects, teachers_subjects, rooms_groups, groups_gaps, subject_day
+from src.engine.constraints import fitness, groups_subjects, teachers_subjects, rooms_groups, groups_gaps, subject_day, friday_distribution_constraints
 from src.engine.data import Data
 
 data_handler = Data()
@@ -470,10 +470,20 @@ def restructure_group_schedule(individual: list[Event], group_id: int, bottlenec
             group_taken_hours.update(range(best_h, best_h + ge.duration))
             scheduled_subjects.add((ge.group, ge.subject, academic_hours[best_h].day_index))
 
-def evaluate_group_day_schedule(group_taken_hours: set[int], candidate_h: int, duration: int) -> float:
+def evaluate_group_day_schedule(
+    group_taken_hours: set[int],
+    candidate_h: int,
+    duration: int,
+    event: Event = None,
+    group_id: int = None,
+    subject_id: int = None
+) -> float:
     """Calcula la penalización del horario de un grupo en un día según las reglas:
     - Inicio tardío (> 1ra hora): Máx. inicio en 3ra hora y 0 baches.
     - Inicio normal (1ra hora): Máx. 2 horas libres y preferiblemente seguidas.
+    - Viernes 1er y 2do año: Finalizar máx. en bloque 12:10-12:50 (rel <= 7).
+    - Viernes Talleres: Finalizar máx. 12:50 para todos los años excepto 4to y 5to.
+    - Minimizar asignación de Talleres los viernes en comparación a otros días.
     """
     day_idx = academic_hours[candidate_h].day_index
     
@@ -502,22 +512,57 @@ def evaluate_group_day_schedule(group_taken_hours: set[int], candidate_h: int, d
 
     penalty = 0.0
 
-    # REGLA 1: Carga diaria mínima (Si hay clases el día, objetivo >= 6 horas)
-    # Si el día resulta en menos de 6 hrs, se castiga proporcionalmente a las horas faltantes
-    if total_hours_today < 6:
-        penalty += (6 - total_hours_today) * 350.0
+    # Metadatos del grupo y materia para evaluación contextual
+    grp_id = event.group if event else group_id
+    sub_id = event.subject if event else subject_id
+    grp = GROUPS_BY_ID.get(grp_id) if grp_id else None
+    grp_year = getattr(grp, 'year', None)
+    subj = SUBJECTS_BY_ID.get(sub_id) if sub_id else None
+    s_type = (getattr(subj, 'subject_type', '') or '').lower()
+    s_name = (getattr(subj, 'name', '') or '').lower()
+    is_taller = "taller" in s_type or "taller" in s_name
+
+    is_friday = (academic_hours[candidate_h].day and academic_hours[candidate_h].day.lower().startswith("vier")) or (day_idx == 4)
+
+    # REGLA 1: Carga diaria mínima (Si hay clases el día, objetivo >= 6 horas en días normales)
+    if is_friday and grp_year in (1, 2):
+        # 1er y 2do año tienen menos carga total y los viernes se busca que salgan temprano (ej: 4 a 6 horas)
+        if total_hours_today < 4:
+            penalty += (4 - total_hours_today) * 350.0
+    else:
+        if total_hours_today < 6:
+            penalty += (6 - total_hours_today) * 350.0
 
     # REGLA 2: Hora de entrada (Evitar iniciar a las 10:00 - 11:00 AM)
     if first_hour == 1:
-        # Entrar a la 2da hora (ej: 8:00 AM) tiene una penalización leve
         penalty += 10.0
     elif first_hour >= 2:
-        # Entrar a la 3ra hora o más tarde se penaliza fuertemente
         penalty += 800.0 + (first_hour - 1) * 400.0
 
     # REGLA 3: Baches / Huecos en la jornada
     if total_gap_hours > 0:
         penalty += total_gap_hours * 300.0
+
+    # REGLA 4: REGLAS ESPECÍFICAS DE VIERNES
+    if is_friday:
+        cand_rel_hours = [h - min_day_global for h in new_event_hours]
+        afternoon_cand = [r for r in cand_rel_hours if r >= 8]  # Bloques después de 12:50 (rel 8 y 9)
+
+        # A. 1er y 2do año: Clases después de 12:50
+        if grp_year in (1, 2) and afternoon_cand:
+            penalty += len(afternoon_cand) * 1000.0
+
+        # B. Talleres los viernes
+        if is_taller:
+            # Preferencia de ubicar talleres de lunes a jueves
+            penalty += 450.0
+            if afternoon_cand:
+                if grp_year not in (4, 5):
+                    # Para 1°, 2°, 3° y 6° año, penalización severa por estar en la tarde
+                    penalty += len(afternoon_cand) * 2500.0
+                else:
+                    # Para 4to y 5to año, penalización leve si cae en la tarde
+                    penalty += len(afternoon_cand) * 150.0
 
     return penalty
 
@@ -537,7 +582,7 @@ def select_best_hour(candidate_hours: list[int], event: Event, taken_hours_group
             continue
             
         # 2. Evaluar el cumplimiento de las reglas del horario del alumno
-        score = evaluate_group_day_schedule(taken_hours_group, h, event.duration)
+        score = evaluate_group_day_schedule(taken_hours_group, h, event.duration, event=event)
 
         if score < best_score:
             best_score = score
@@ -551,7 +596,7 @@ def select_best_hour(candidate_hours: list[int], event: Event, taken_hours_group
     if best_hour is None and candidate_hours:
         best_hour = min(
             candidate_hours,
-            key=lambda h: evaluate_group_day_schedule(taken_hours_group, h, event.duration)
+            key=lambda h: evaluate_group_day_schedule(taken_hours_group, h, event.duration, event=event)
         )
 
     return best_hour
@@ -583,18 +628,31 @@ def create_events():
             elif group.rooms is not None:
                 room = random.choice(group.rooms)
 
+            teacher_name = teacher.name.strip() if teacher and teacher.name else ""
+            is_yeesika = "yeesika" in teacher_name.lower()
+            is_taller = subject.subject_type == "(Taller) Formacion Cientifica, Tecnologica y Productiva"
+
             while left_hours > 0:
-                if 2 < left_hours < 8:
+                if is_yeesika and not is_taller:
+                    if left_hours >= 6:
+                        duration = 6
+                    else:
+                        duration = left_hours
+
+                elif 2 < left_hours < 8:
                     duration = 2 if left_hours % 2 == 0 else random.randint(2, left_hours)
 
-                elif left_hours > 2 and subject.subject_type != "(Taller) Formacion Cientifica, Tecnologica y Productiva":
+                elif left_hours > 2 and not is_taller:
                     if subject.subject_type == "General":
                         duration = 4
+
                     else:
                         duration = random.choice([6, 8])
                     
                 else:
                     duration = left_hours
+
+                duration = min(duration, left_hours)
 
                 event_list.append(Event(id, teacher, subject, group, duration, room))
                 id += 1
@@ -684,7 +742,7 @@ def create_timetable(events: list[Event], complementary_config: dict = None):
                     academic_hours[before_h + event.duration - 1].day_index == day):
                     candidates.append(before_h)
 
-            random.shuffle(candidates)
+            valid_candidates = []
             for ch in candidates:
                 ch_range = set(range(ch, ch + event.duration))
                 if (not groups_block[event.group].intersection(ch_range) and
@@ -692,8 +750,13 @@ def create_timetable(events: list[Event], complementary_config: dict = None):
                     is_teacher_available(event.teacher, ch, event.duration) and
                     not is_subject_already_on_day(scheduled_subjects, event, ch) and
                     not creates_gap(ch, event.duration, groups_block[event.group])):
-                    pref_hour = ch
-                    break
+                    valid_candidates.append(ch)
+
+            if valid_candidates:
+                pref_hour = min(
+                    valid_candidates,
+                    key=lambda ch: evaluate_group_day_schedule(groups_block[event.group], ch, event.duration, event=event)
+                )
 
         if pref_hour is not None:
             start_hour = pref_hour
@@ -705,45 +768,65 @@ def create_timetable(events: list[Event], complementary_config: dict = None):
             scheduled_subjects.add((event.group, event.subject, assigned_day))
             found_block = True
         else:
-            start_hour = random_start_hour(event.duration, event.teacher)
-            for _ in range(50):
-                event_hours = set(range(start_hour, start_hour + event.duration))
-
-                if (not groups_block[event.group].intersection(event_hours) and 
-                    not teachers_block[event.teacher].intersection(event_hours) and 
-                    is_teacher_available(event.teacher, start_hour, event.duration) and
-                    not is_subject_already_on_day(scheduled_subjects, event, start_hour) and
-                    not creates_gap(start_hour, event.duration, groups_block[event.group])):
-                    
-                    event.start_hour = start_hour
-                    groups_block[event.group].update(event_hours)
-                    teachers_block[event.teacher].update(event_hours)
-
-                    assigned_day = academic_hours[start_hour].day_index
-                    scheduled_subjects.add((event.group, event.subject, assigned_day))
-
-                    found_block = True
-                    break
-
-                start_hour = move_hour(start_hour, event.duration)
-
-        if not found_block:
+            # Buscar en todas las horas disponibles del profesor con menor penalización
             possible_hours = []
             teacher = TEACHERS_BY_ID.get(event.teacher)
 
-            if teacher:
+            if teacher and teacher.availabilities:
                 for av in teacher.availabilities:
                     max_start = (av.end_idx - event.duration) + 1
                     for h in range(av.start_idx, max_start + 1):
-                        h_range = set(range(h, h + event.duration))
-                        if (not is_subject_already_on_day(scheduled_subjects, event, h) and
-                            not groups_block[event.group].intersection(h_range) and
-                            not teachers_block[event.teacher].intersection(h_range)):
-                            possible_hours.append(h)
-            
-            event.start_hour = random.choice(possible_hours) if possible_hours else random_start_hour(event.duration, event.teacher)
+                        if (academic_hours[h].day_index == academic_hours[h + event.duration - 1].day_index and
+                            not any((h + i) in GLOBAL_BLOCKED_HOURS for i in range(event.duration))):
+                            h_range = set(range(h, h + event.duration))
+                            if (not is_subject_already_on_day(scheduled_subjects, event, h) and
+                                not groups_block[event.group].intersection(h_range) and
+                                not teachers_block[event.teacher].intersection(h_range) and
+                                not creates_gap(h, event.duration, groups_block[event.group])):
+                                possible_hours.append(h)
 
-            event_hours = range(event.start_hour, event.start_hour + event.duration)
+            if possible_hours:
+                event.start_hour = min(
+                    possible_hours,
+                    key=lambda h: evaluate_group_day_schedule(groups_block[event.group], h, event.duration, event=event)
+                )
+                found_block = True
+            else:
+                start_hour = random_start_hour(event.duration, event.teacher)
+                for _ in range(50):
+                    event_hours = set(range(start_hour, start_hour + event.duration))
+
+                    if (not groups_block[event.group].intersection(event_hours) and 
+                        not teachers_block[event.teacher].intersection(event_hours) and 
+                        is_teacher_available(event.teacher, start_hour, event.duration) and
+                        not is_subject_already_on_day(scheduled_subjects, event, start_hour) and
+                        not creates_gap(start_hour, event.duration, groups_block[event.group])):
+                        
+                        event.start_hour = start_hour
+                        found_block = True
+                        break
+
+                    start_hour = move_hour(start_hour, event.duration)
+
+            if not found_block:
+                fallback_hours = []
+                if teacher and teacher.availabilities:
+                    for av in teacher.availabilities:
+                        max_start = (av.end_idx - event.duration) + 1
+                        for h in range(av.start_idx, max_start + 1):
+                            if academic_hours[h].day_index == academic_hours[h + event.duration - 1].day_index:
+                                h_range = set(range(h, h + event.duration))
+                                if (not is_subject_already_on_day(scheduled_subjects, event, h) and
+                                    not groups_block[event.group].intersection(h_range) and
+                                    not teachers_block[event.teacher].intersection(h_range)):
+                                    fallback_hours.append(h)
+                
+                event.start_hour = min(
+                    fallback_hours,
+                    key=lambda h: evaluate_group_day_schedule(groups_block[event.group], h, event.duration, event=event)
+                ) if fallback_hours else random_start_hour(event.duration, event.teacher)
+
+            event_hours = set(range(event.start_hour, event.start_hour + event.duration))
             groups_block[event.group].update(event_hours)
             teachers_block[event.teacher].update(event_hours)
 
@@ -1099,6 +1182,10 @@ def main():
     for fail in final_report['subject_duplications']:
         print(f"  - Grupo {fail['group']} ({dias_semana[fail['day']]}): La materia {fail['subject']} se imparte de forma fragmentada en los Eventos {fail['event_1_id']} y {fail['event_2_id']}.")
 
+    print(f"\n[!] Distribución de Horarios de Viernes: {len(final_report.get('friday_distribution', []))}")
+    for fail in final_report.get('friday_distribution', []):
+        print(f"  - Grupo {fail['group']} (Viernes): {fail['type']}. Penalización: {fail.get('penalty', 0)}")
+
     print("\n" + "="*50)
 
 def print_population(population: list[list[Event]]):
@@ -1107,14 +1194,6 @@ def print_population(population: list[list[Event]]):
         if i < 1:
             for event in individual:
                 print(event)
-        #     for subject in individual:
-        #         for block in subject:
-        #             g, s, t, s_h, e_h, r = block
-        #             print(f"  Sec: {g} | Mat: {s} | Prof: {t} | Inicio: {s_h} | Fin: {e_h} | Aula: {r}")
-                    
-        # else:
-        #     print("  [... Otros horarios ocultos ...]")
-        #     break
 
 def evaluate_and_report(best_individual: list[Event]):
     """
@@ -1126,14 +1205,16 @@ def evaluate_and_report(best_individual: list[Event]):
     r_score, room_collisions = rooms_groups(best_individual)
     gap_score, gaps_report = groups_gaps(best_individual, academic_hours, academic_hours_limits)
     sub_score, subject_duplications = subject_day(best_individual, academic_hours)
+    fri_score, friday_report = friday_distribution_constraints(best_individual, academic_hours, academic_hours_limits, GROUPS_BY_ID, SUBJECTS_BY_ID)
     
     report = {
-        "total_fitness": g_score + t_score + r_score + gap_score + sub_score,
+        "total_fitness": g_score + t_score + r_score + gap_score + sub_score + fri_score,
         "group_collisions": group_collisions,
         "teacher_collisions": teacher_collisions,
         "room_collisions": room_collisions,
         "gaps": gaps_report,
-        "subject_duplications": subject_duplications
+        "subject_duplications": subject_duplications,
+        "friday_distribution": friday_report
     }
     return report
 

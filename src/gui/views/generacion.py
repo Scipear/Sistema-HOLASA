@@ -641,6 +641,17 @@ def vista_generacion():
 
         items_reporte.append(helper_seccion("Materias Repetidas el Mismo Día", report.get("subject_duplications", []), fmt_rep, ft.icons.REPEAT_ROUNDED))
 
+        # 6. Distribución de Horarios de Viernes
+        def fmt_viernes(f):
+            grp = fmt_grupo_nombre(f.get('group', ''))
+            tipo = f.get('type', '')
+            afternoon_hours = f.get('afternoon_hours', [])
+            if afternoon_hours:
+                return f"La sección {grp}: {tipo} (horas: {', '.join(afternoon_hours)})."
+            return f"La sección {grp}: {tipo}."
+
+        items_reporte.append(helper_seccion("Distribución de Horarios de Viernes", report.get("friday_distribution", []), fmt_viernes, ft.icons.EVENT_AVAILABLE_ROUNDED))
+
         btn_si_exportar = ft.ElevatedButton(
             "Sí, Exportar",
             icon=ft.icons.DOWNLOAD_ROUNDED,

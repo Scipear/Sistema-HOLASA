@@ -67,12 +67,14 @@ def _room_label(event_room, group_info: dict, maps: dict) -> str | None:
 
 
 def _cell_text(subject_id: int, group_id: int, event_room, maps: dict) -> str:
-    """Texto de celda: 'Asignatura\nCurso · Aula'."""
+    """Texto de celda: 'Asignatura\nCurso · (Aula)'."""
     subject_names = maps["subject_names"]
     subject = _abbreviate_subject(subject_names.get(subject_id, str(subject_id)))
     curso = _group_short_label(group_id, maps)
     group_info = maps["group_info"].get(group_id, {})
     aula = _room_label(event_room, group_info, maps)
+    if aula:
+        aula = f"({aula})"
 
     line2 = " · ".join(part for part in (curso, aula) if part)
     return f"{subject}\n{line2}" if line2 else subject

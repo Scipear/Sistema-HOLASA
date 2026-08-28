@@ -19,6 +19,7 @@ from src.export.pdf_exporter import (
     _LOGO_PATH,
     _build_data_maps,
     _build_grid,
+    _empty_cell_spans,
     _group_title,
     _time_label_for_row,
     _year_label,
@@ -151,9 +152,17 @@ def write_grid(ws, data: Data, grid: list, spans: list) -> None:
     for (r0, c0), (r1, c1) in spans:
         ws.merge_cells(
             start_row=GRID_START_ROW + r0,
-            start_column=c0,
+            start_column=c0 + 1,
             end_row=GRID_START_ROW + r1,
-            end_column=c1,
+            end_column=c1 + 1,
+        )
+
+    for (r0, c0), (r1, c1) in _empty_cell_spans(grid, spans):
+        ws.merge_cells(
+            start_row=GRID_START_ROW + r0,
+            start_column=c0 + 1,
+            end_row=GRID_START_ROW + r1,
+            end_column=c1 + 1,
         )
 
     footer_row = GRID_START_ROW + GRID_ROWS + 1

@@ -31,6 +31,7 @@ from src.export.pdf_exporter import (
     _course_style,
     _display_row,
     _draw_logo,
+    _empty_cell_spans,
     _footer_style,
     _head_style,
     _hour_style,
@@ -202,6 +203,8 @@ def _teacher_page_story(
         ]
     ))
     for (r0, c0), (r1, c1) in spans:
+        table.setStyle(TableStyle([("SPAN", (c0, r0), (c1, r1))]))
+    for (r0, c0), (r1, c1) in _empty_cell_spans(grid, spans):
         table.setStyle(TableStyle([("SPAN", (c0, r0), (c1, r1))]))
 
     story.append(table)

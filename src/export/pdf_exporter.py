@@ -356,7 +356,20 @@ def _group_page_story(
 
     story.append(table)
     story.append(Spacer(1, 10))
-    story.append(Paragraph("Realizado por HOLASA", _footer_style))
+
+    footer = Table(
+        [[Paragraph("Realizado por HOLASA", _footer_left_style),
+          Paragraph("Horario sujeto a cambios", _footer_warn_style)]],
+        colWidths=[380, 380],
+    )
+    footer.setStyle(TableStyle(
+        [
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ]
+    ))
+    story.append(footer)
 
 
 def export_year_pdf(
@@ -480,4 +493,11 @@ _break_style = ParagraphStyle(
 )
 _footer_style = ParagraphStyle(
     "Footer", fontName="Helvetica", fontSize=10, leading=12, alignment=1
+)
+_footer_left_style = ParagraphStyle(
+    "FooterLeft", fontName="Helvetica", fontSize=10, leading=12, alignment=0
+)
+_footer_warn_style = ParagraphStyle(
+    "FooterWarn", fontName="Helvetica-Bold", fontSize=10, leading=12, alignment=2,
+    textColor=colors.red
 )

@@ -32,7 +32,8 @@ from src.export.pdf_exporter import (
     _display_row,
     _draw_logo,
     _empty_cell_spans,
-    _footer_style,
+    _footer_left_style,
+    _footer_warn_style,
     _head_style,
     _hour_style,
     _time_label_for_row,
@@ -211,7 +212,20 @@ def _teacher_page_story(
 
     story.append(table)
     story.append(Spacer(1, 10))
-    story.append(Paragraph("Realizado por HOLASA", _footer_style))
+
+    footer = Table(
+        [[Paragraph("Realizado por HOLASA", _footer_left_style),
+          Paragraph("Horario sujeto a cambios", _footer_warn_style)]],
+        colWidths=[380, 380],
+    )
+    footer.setStyle(TableStyle(
+        [
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ]
+    ))
+    story.append(footer)
 
 
 def export_teacher_pdf(

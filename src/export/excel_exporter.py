@@ -49,8 +49,10 @@ _FONT_HOUR = Font(size=9)
 _FONT_CELL = Font(size=9)
 _FONT_BREAK = Font(bold=True, size=10)
 _FONT_FOOTER = Font(size=10)
+_FONT_WARN = Font(bold=True, size=10, color="FF0000")
 
 _ALIGN_CENTER = Alignment(horizontal="center", vertical="center")
+_ALIGN_RIGHT = Alignment(horizontal="right", vertical="center")
 _ALIGN_WRAP = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
 
@@ -166,9 +168,12 @@ def write_grid(ws, data: Data, grid: list, spans: list) -> None:
         )
 
     footer_row = GRID_START_ROW + GRID_ROWS + 1
-    ws.merge_cells(start_row=footer_row, start_column=1, end_row=footer_row, end_column=N_COLS)
+    ws.merge_cells(start_row=footer_row, start_column=1, end_row=footer_row, end_column=3)
     c = ws.cell(row=footer_row, column=1, value="Realizado por HOLASA")
     c.font, c.alignment = _FONT_FOOTER, _ALIGN_CENTER
+    ws.merge_cells(start_row=footer_row, start_column=4, end_row=footer_row, end_column=N_COLS)
+    w = ws.cell(row=footer_row, column=4, value="Horario sujeto a cambios")
+    w.font, w.alignment = _FONT_WARN, _ALIGN_RIGHT
 
 
 def export_year_excel(

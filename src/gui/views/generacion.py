@@ -338,6 +338,22 @@ def vista_generacion():
                         year_label=dd_anio.value
                     )
 
+                if export_all_excel is not None:
+                    excel_dir = os.path.join(output_dir, "excel")
+                    export_all_excel(
+                        timetable=best_timetable,
+                        output_dir=excel_dir,
+                        year_label=dd_anio.value
+                    )
+
+                if export_all_teachers_excel is not None:
+                    excel_dir = os.path.join(output_dir, "excel")
+                    export_all_teachers_excel(
+                        timetable=best_timetable,
+                        output_dir=excel_dir,
+                        year_label=dd_anio.value
+                    )
+
             badge_estado.visible = True
             
             page.snack_bar = ft.SnackBar(
@@ -641,6 +657,17 @@ def vista_generacion():
             return f"La materia {materia} se dicta de forma repetida los dias {dia_str} para la seccion {grp}."
 
         items_reporte.append(helper_seccion("Materias Repetidas el Mismo Día", report.get("subject_duplications", []), fmt_rep, ft.icons.REPEAT_ROUNDED))
+
+        # 6. Distribución de Horarios de Viernes
+        def fmt_viernes(f):
+            grp = fmt_grupo_nombre(f.get('group', ''))
+            tipo = f.get('type', '')
+            afternoon_hours = f.get('afternoon_hours', [])
+            if afternoon_hours:
+                return f"La sección {grp}: {tipo} (horas: {', '.join(afternoon_hours)})."
+            return f"La sección {grp}: {tipo}."
+
+        items_reporte.append(helper_seccion("Distribución de Horarios de Viernes", report.get("friday_distribution", []), fmt_viernes, ft.icons.EVENT_AVAILABLE_ROUNDED))
 
         btn_si_exportar = ft.ElevatedButton(
             "Sí, Exportar",

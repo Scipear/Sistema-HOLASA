@@ -52,7 +52,7 @@ class vista_profesores(ft.Container):
         self.dias_sesiones = {}
         self.map_salones = {}
         self.asignaturas_temp = []
-        self.sesiones_temp = []
+        self.sesiones_temp = []  # Almacena bloques de horario: [{"id_ini": int, "id_fin": int, "dia": str}, ...]
         self.salones_temp = []
         self.profesor_actual_id = None
 
@@ -244,7 +244,7 @@ class vista_profesores(ft.Container):
                     
                     ft.Divider(color="#303346", height=10),
                     
-                    ft.Text("Disponibilidad Horaria (Bloques de Sesiones)", color=ft.colors.WHITE, weight=ft.FontWeight.BOLD, size=14),
+                    ft.Text("Disponibilidad Horaria (Bloques por Sesión)", color=ft.colors.WHITE, weight=ft.FontWeight.BOLD, size=14),
                     ft.Row([
                         ft.Container(content=self.dd_dia, expand=2),
                         ft.Container(content=self.dd_sesion_inicio, expand=3),
@@ -394,6 +394,7 @@ class vista_profesores(ft.Container):
         return str(h_str).strip(), 0
     
     def agrupar_sesiones_bloques(self, ses_ids):
+        """Agrupa las sesiones a partir de los límites almacenados (inicio y fin)."""
         dias_agrupados = {}
         for s_id in ses_ids:
             s_data = self.sesiones_completas.get(s_id)
@@ -414,17 +415,27 @@ class vista_profesores(ft.Container):
         for dia in sorted(dias_agrupados.keys(), key=orden_cronologico):
             sesiones_dia = sorted(dias_agrupados[dia], key=lambda x: x['min_i'])
             
-            if sesiones_dia:
-                primera = sesiones_dia[0]
-                ultima = sesiones_dia[-1]
-                ids_bloque = [s['id'] for s in sesiones_dia]
-                
-                if primera['id'] == ultima['id']:
-                    texto = f"{dia} {primera['h_i']} - {primera['h_f']}"
+            i = 0
+            while i < len(sesiones_dia):
+                s_ini = sesiones_dia[i]
+                if i + 1 < len(sesiones_dia):
+                    s_fin = sesiones_dia[i + 1]
+                    i += 2
                 else:
-                    texto = f"{dia} {primera['h_i']} - {primera['h_f']} a {ultima['h_i']} - {ultima['h_f']}"
+                    s_fin = s_ini
+                    i += 1
                 
-                bloques.append({"texto": texto, "ids": ids_bloque})
+                ids_bloque = [s_ini['id']]
+                if s_fin['id'] != s_ini['id']:
+                    ids_bloque.append(s_fin['id'])
+
+                if s_ini['id'] == s_fin['id']:
+                    texto = f"{dia} {s_ini['h_i']} - {s_ini['h_f']}"
+                else:
+                    # Modificación visual aplicada para mantener el formato detallado con " a "
+                    texto = f"{dia} {s_ini['h_i']} - {s_ini['h_f']} a {s_fin['h_i']} - {s_fin['h_f']}"
+                
+                bloques.append({"texto": texto, "ids": ids_bloque, "id_ini": s_ini['id'], "id_fin": s_fin['id'], "dia": dia})
                 
         return bloques
 
@@ -487,15 +498,22 @@ class vista_profesores(ft.Container):
 
     def refrescar_ui_sesion(self):
         self.lista_chips_sesion.controls.clear()
-        bloques = self.agrupar_sesiones_bloques(self.sesiones_temp)
-        for bloque in bloques:
-            self.lista_chips_sesion.controls.append(
-                ft.Chip(
-                    label=ft.Text(bloque['texto'], size=11, color=ft.colors.WHITE),
-                    on_delete=lambda e, ids_del=bloque['ids']: self.remover_bloque_sesion(ids_del, e),
-                    bgcolor="#2A2D3E"
+        for bloque in self.sesiones_temp:
+            s_ini = self.sesiones_completas.get(bloque["id_ini"])
+            s_fin = self.sesiones_completas.get(bloque["id_fin"])
+            if s_ini and s_fin:
+                if bloque["id_ini"] == bloque["id_fin"]:
+                    texto = f"{bloque['dia']} {s_ini['h_i']} - {s_ini['h_f']}"
+                else:
+                    texto = f"{bloque['dia']} {s_ini['h_i']} - {s_ini['h_f']} a {s_fin['h_i']} - {s_fin['h_f']}"
+                
+                self.lista_chips_sesion.controls.append(
+                    ft.Chip(
+                        label=ft.Text(texto, size=11, color=ft.colors.WHITE),
+                        on_delete=lambda e, b=bloque: self.remover_bloque_sesion(b, e),
+                        bgcolor="#2A2D3E"
+                    )
                 )
-            )
 
     def remover_salon(self, id_del, e):
         if id_del in self.salones_temp:
@@ -509,12 +527,11 @@ class vista_profesores(ft.Container):
             self.refrescar_ui_asig()
             e.page.update()
 
-    def remover_bloque_sesion(self, ids_del, e):
-        for id_del in ids_del:
-            if id_del in self.sesiones_temp:
-                self.sesiones_temp.remove(id_del)
-        self.refrescar_ui_sesion()
-        e.page.update()
+    def remover_bloque_sesion(self, bloque, e):
+        if bloque in self.sesiones_temp:
+            self.sesiones_temp.remove(bloque)
+            self.refrescar_ui_sesion()
+            e.page.update()
 
     def agregar_salon(self, e):
         if not self.dd_salon.value: return
@@ -539,6 +556,7 @@ class vista_profesores(ft.Container):
             self.mostrar_notificacion(e, "El curso/asignatura ya está asignado.", True)
 
     def agregar_sesion(self, e):
+        """Almacena el bloque de horario definiendo estrictamente la sesión de inicio y final."""
         dia_sel = self.dd_dia.value
         id_ini = self.dd_sesion_inicio.value
         id_fin = self.dd_sesion_fin.value
@@ -547,18 +565,14 @@ class vista_profesores(ft.Container):
             self.mostrar_notificacion(e, "Complete día, sesión inicial y sesión final.", True)
             return
 
-        sesiones_del_dia = self.dias_sesiones.get(dia_sel, [])
-        min_i_ini = next((s['min_i'] for s in sesiones_del_dia if str(s['id']) == id_ini), 0)
-        min_i_fin = next((s['min_i'] for s in sesiones_del_dia if str(s['id']) == id_fin), float('inf'))
+        nuevo_bloque = {
+            "id_ini": int(id_ini),
+            "id_fin": int(id_fin),
+            "dia": dia_sel
+        }
 
-        agregadas = False
-        for s in sesiones_del_dia:
-            if min_i_ini <= s['min_i'] <= min_i_fin:
-                if s['id'] not in self.sesiones_temp:
-                    self.sesiones_temp.append(s['id'])
-                    agregadas = True
-        
-        if agregadas:
+        if nuevo_bloque not in self.sesiones_temp:
+            self.sesiones_temp.append(nuevo_bloque)
             self.refrescar_ui_sesion()
             self.dd_dia.value = None
             self.dd_sesion_inicio.value = None
@@ -567,7 +581,7 @@ class vista_profesores(ft.Container):
             self.dd_sesion_fin.options = []
             e.page.update()
         else:
-            self.mostrar_notificacion(e, "Las sesiones en este rango temporal ya están agregadas.", True)
+            self.mostrar_notificacion(e, "Este bloque de horario ya ha sido agregado.", True)
 
     def abrir_modal_crear(self, e):
         self.profesor_actual_id = None
@@ -598,8 +612,17 @@ class vista_profesores(ft.Container):
         self.dd_salon.value = None 
         
         self.asignaturas_temp = list(p_data["asignaturas"])
-        self.sesiones_temp = list(p_data["sesiones"])
         self.salones_temp = list(p_data.get("salones", [])) 
+        
+        # Reconstruir los bloques de sesión a partir de los IDs de sesiones almacenados en base de datos
+        self.sesiones_temp.clear()
+        bloques_cargados = self.agrupar_sesiones_bloques(list(p_data["sesiones"]))
+        for b in bloques_cargados:
+            self.sesiones_temp.append({
+                "id_ini": b["id_ini"],
+                "id_fin": b["id_fin"],
+                "dia": b["dia"]
+            })
         
         self.refrescar_ui_asig()
         self.refrescar_ui_sesion()
@@ -641,20 +664,27 @@ class vista_profesores(ft.Container):
                     if a_id not in self.asignaturas_temp:
                         self.prof_asig_service.desasignar(db, rel_id)
 
-                # --- Sesiones ---
+                # --- Sesiones (Almacenamiento por Bloque: Sesión Inicio y Sesión Fin) ---
                 rels_ses_existentes = self.sesion_prof_service.obtener_por_profesor(db, prof_id)
-                ids_ses_asignadas = {rel.sesion_id for rel in rels_ses_existentes}
+                
+                # Obtener los IDs de sesiones actuales que representan los bloques configurados
+                ids_sesiones_deseadas = set()
+                for bloque in self.sesiones_temp:
+                    ids_sesiones_deseadas.add(bloque["id_ini"])
+                    ids_sesiones_deseadas.add(bloque["id_fin"])
+
+                ids_sesiones_existentes = {rel.sesion_id for rel in rels_ses_existentes}
                 map_rel_id_ses = {rel.sesion_id: rel.id for rel in rels_ses_existentes}
 
-                for s_id in self.sesiones_temp:
-                    if s_id not in ids_ses_asignadas:
+                for s_id in ids_sesiones_deseadas:
+                    if s_id not in ids_sesiones_existentes:
                         try:
                             self.sesion_prof_service.asignar(db, s_id, prof_id)
                         except ValueError as ex:
                             self.mostrar_notificacion(e, f"Aviso de Sesión: {str(ex)}", es_error=True)
 
                 for s_id, rel_id in map_rel_id_ses.items():
-                    if s_id not in self.sesiones_temp:
+                    if s_id not in ids_sesiones_deseadas:
                         self.sesion_prof_service.desasignar(db, rel_id)
 
                 # --- Salones (Aulas) ---
@@ -669,7 +699,6 @@ class vista_profesores(ft.Container):
                             self.salon_prof_service.asignar(db, s_id, prof_id)
                             asignado_exitosamente = True
                         except Exception:
-                            # Intento alternativo robusto si el método de servicio directo falla
                             try:
                                 if hasattr(self.salon_prof_service, 'create'):
                                     self.salon_prof_service.create(db, {"salon_id": s_id, "profesor_id": prof_id})
@@ -680,7 +709,6 @@ class vista_profesores(ft.Container):
                             except Exception:
                                 pass
                             
-                            # Fallback final por SQL directo si las estrategias de servicio fallan
                             if not asignado_exitosamente:
                                 try:
                                     db.execute(

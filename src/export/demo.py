@@ -10,9 +10,8 @@ Por defecto exporta los PDFs por año/curso y también el horario individual de 
 profesor (Horario_Prof_*.pdf), siempre sobre el mismo horario generado.
 Usa --no-profesores para exportar solo los horarios por año/curso.
 
-Con --excel se generan además los horarios en formato Excel, separados de los
-PDF: un workbook por año (una hoja por curso) en <output-dir>/excel/ y el
-horario de cada profesor dentro de <output-dir>/excel/Horarios_Profesores/.
+Con --excel se generan además los horarios en formato Excel en la subcarpeta
+Horarios Excel/, separados de los PDFs en Horarios PDF/.
 """
 import argparse
 import os
@@ -41,17 +40,17 @@ def main() -> None:
 
     extra_exporter = None
     if args.profesores or args.excel:
-        from src.export.teacher_pdf_exporter import export_all_teachers
+        pdf_dir = os.path.join(args.output_dir, "Horarios PDF")
+        excel_dir = os.path.join(args.output_dir, "Horarios Excel") if args.excel else None
 
         def extra_exporter(timetable, output_dir, year_label):
             results = []
             if args.profesores:
-                results += export_all_teachers(timetable, output_dir, year_label=year_label)
+                from src.export.teacher_pdf_exporter import export_all_teachers
+                results += export_all_teachers(timetable, pdf_dir, year_label=year_label)
             if args.excel:
                 from src.export.excel_exporter import export_all_excel
                 from src.export.teacher_excel_exporter import export_all_teachers_excel
-
-                excel_dir = os.path.join(output_dir, "excel")
                 results += export_all_excel(timetable, excel_dir, year_label=year_label)
                 results += export_all_teachers_excel(timetable, excel_dir, year_label=year_label)
             return results
@@ -60,7 +59,7 @@ def main() -> None:
         from src.export.pdf_exporter import export_from_genetics
 
         created = export_from_genetics(
-            args.output_dir,
+            os.path.join(args.output_dir, "Horarios PDF"),
             year_label=args.year_label,
             generations=args.generations,
             extra_exporter=extra_exporter,
@@ -71,7 +70,7 @@ def main() -> None:
 
         events = genetics.create_events()
         timetable = genetics.create_timetable(events)
-        created = export_all(timetable, args.output_dir, year_label=args.year_label)
+        created = export_all(timetable, os.path.join(args.output_dir, "Horarios PDF"), year_label=args.year_label)
 
         if extra_exporter is not None:
             created += extra_exporter(timetable, args.output_dir, args.year_label)

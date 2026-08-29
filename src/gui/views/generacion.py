@@ -303,21 +303,38 @@ def vista_generacion():
         page.update()
 
         try:
-            os.makedirs(output_dir, exist_ok=True)
+            pdf_dir = os.path.join(output_dir, "Horarios PDF")
+            excel_dir = os.path.join(output_dir, "Horarios Excel")
+            os.makedirs(pdf_dir, exist_ok=True)
+            os.makedirs(excel_dir, exist_ok=True)
 
             best_timetable = estado_ref.get("best_timetable")
             if best_timetable is not None:
                 if export_all is not None:
                     export_all(
                         timetable=best_timetable,
-                        output_dir=output_dir,
+                        output_dir=pdf_dir,
                         year_label=dd_anio.value
                     )
 
                 if export_all_teachers is not None:
                     export_all_teachers(
                         timetable=best_timetable,
-                        output_dir=output_dir,
+                        output_dir=pdf_dir,
+                        year_label=dd_anio.value
+                    )
+
+                if export_all_excel is not None:
+                    export_all_excel(
+                        timetable=best_timetable,
+                        output_dir=excel_dir,
+                        year_label=dd_anio.value
+                    )
+
+                if export_all_teachers_excel is not None:
+                    export_all_teachers_excel(
+                        timetable=best_timetable,
+                        output_dir=excel_dir,
                         year_label=dd_anio.value
                     )
 

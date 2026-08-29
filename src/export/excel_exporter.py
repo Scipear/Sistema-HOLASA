@@ -50,6 +50,7 @@ _FONT_CELL = Font(size=9)
 _FONT_BREAK = Font(bold=True, size=10)
 _FONT_FOOTER = Font(size=10)
 _FONT_WARN = Font(bold=True, size=10, color="FF0000")
+_FONT_TOTAL = Font(bold=True, size=9, color="1F4E78")
 
 _ALIGN_CENTER = Alignment(horizontal="center", vertical="center")
 _ALIGN_RIGHT = Alignment(horizontal="right", vertical="center")
@@ -121,7 +122,7 @@ def write_sheet_skeleton(ws, band_text: str, data: Data, year_label: str) -> Non
         ws.column_dimensions[col_letter].width = 28
 
 
-def write_grid(ws, data: Data, grid: list, spans: list) -> None:
+def write_grid(ws, data: Data, grid: list, spans: list, total_label: str | None = None) -> None:
     """Escribe las 12 filas de la grilla (horas, RECESO/ALMUERZO y eventos)."""
     for grid_row in range(1, GRID_ROWS + 1):
         sheet_row = GRID_START_ROW + grid_row
@@ -168,6 +169,14 @@ def write_grid(ws, data: Data, grid: list, spans: list) -> None:
         )
 
     footer_row = GRID_START_ROW + GRID_ROWS + 1
+    if total_label is not None:
+        c = ws.cell(row=footer_row, column=N_COLS, value=total_label)
+        c.font = _FONT_TOTAL
+        c.alignment = _ALIGN_CENTER
+        c.border = _BORDER_ALL
+        ws.row_dimensions[footer_row].height = 24
+        footer_row += 1
+
     ws.merge_cells(start_row=footer_row, start_column=1, end_row=footer_row, end_column=3)
     c = ws.cell(row=footer_row, column=1, value="Realizado por HOLASA")
     c.font, c.alignment = _FONT_FOOTER, _ALIGN_CENTER

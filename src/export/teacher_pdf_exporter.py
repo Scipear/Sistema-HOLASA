@@ -117,15 +117,6 @@ def _cell_text(subject_id: int, group_id: int, event_room, maps: dict) -> str:
     return f"{subject}\n{line2}" if line2 else subject
 
 
-def _slot_minutes(row: int, data: Data, day: int) -> int:
-    """Minutos reales de la sesión que ocupa la fila de grilla (1..12) en un día."""
-    pos = row - 1 - (1 if row > 3 else 0) - (1 if row > 9 else 0)
-    ah = data.academic_hours[data.academic_hours_limits[day]["min"] + pos]
-    start = data.parse_24h(ah.start_hour)
-    end = data.parse_24h(ah.end_hour)
-    return (end.hour * 60 + end.minute) - (start.hour * 60 + start.minute)
-
-
 def _build_grid_teacher(teacher_id: int, events: list, data: Data, maps: dict) -> tuple:
     """Construye la grilla de 12 filas x 5 días para un profesor.
 
@@ -228,18 +219,11 @@ def _teacher_page_story(
             line += [_teacher_cell_paragraph(grid[row - 1][day] or "") for day in range(5)]
         rows.append(line)
 
-    occupied = {
+    total_label = f"Total de horas: {len({
         (row, c0)
         for (r0, c0), (r1, c1) in spans
         for row in range(r0, r1 + 1)
-    }
-    total_minutes = sum(_slot_minutes(row, data, c0 - 1) for row, c0 in occupied)
-    total_h, total_m = divmod(total_minutes, 60)
-    total_label = (
-        f"Total: {total_h} h {total_m:02d} min"
-        if total_h
-        else f"Total: {total_m} min"
-    )
+    })}"
 
     row_heights = [24, 30, 30, 24, 30, 30, 30, 30, 30, 24, 30, 30, 30]
     table = Table(rows, colWidths=[70, 138, 138, 138, 138, 138], rowHeights=row_heights)

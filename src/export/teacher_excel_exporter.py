@@ -19,7 +19,6 @@ from src.export.pdf_exporter import (
     _display_row,
     _year_label,
 )
-from src.export.teacher_pdf_exporter import _slot_minutes
 
 
 def _build_teacher_maps(data: Data) -> dict:
@@ -137,18 +136,11 @@ def export_teacher_excel(
     ws.title = "Horario"
     write_sheet_skeleton(ws, f"Prof. {_teacher_name(teacher_id, maps)}", data, year_label)
     grid, spans = _build_grid_teacher(teacher_id, events, data, maps)
-    occupied = {
+    total_label = f"Total de horas: {len({
         (row, c0)
         for (r0, c0), (r1, c1) in spans
         for row in range(r0, r1 + 1)
-    }
-    total_minutes = sum(_slot_minutes(row, data, c0 - 1) for row, c0 in occupied)
-    total_h, total_m = divmod(total_minutes, 60)
-    total_label = (
-        f"Total: {total_h} h {total_m:02d} min"
-        if total_h
-        else f"Total: {total_m} min"
-    )
+    })}"
     write_grid(ws, data, grid, spans, total_label)
     _add_logo(ws)
     wb.save(output_path)

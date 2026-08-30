@@ -18,11 +18,11 @@ class SesionProfesorRepository(BaseRepository):
             profesor_id: ID del profesor.
 
         Returns:
-            Lista de asignaciones del profesor.
+            Lista de asignaciones del profesor ordenadas por sesión.
         """
         return db.query(self.model_class).filter(
             self.model_class.profesor_id == profesor_id
-        ).all()
+        ).order_by(self.model_class.sesion_id.asc()).all()
 
     def get_by_sesion(self, db: Session, sesion_id: int):
         """Obtiene todos los profesores asignados a una sesión.

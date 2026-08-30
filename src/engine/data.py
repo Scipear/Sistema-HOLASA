@@ -98,10 +98,14 @@ class Data():
             for t in teachers_db:
                 teacher_availabilities = SesionProfesorRepository().get_by_profesor(db, t.id)
                 t_rooms = SalonProfesorRepository().get_by_profesor(db, t.id)
+
+                total_items = len(teacher_availabilities)
+                if total_items % 2 != 0:
+                    total_items -= 1
                 
                 availabilities = []
                 # Iteramos de 2 en 2 para agrupar los pares (inicio, fin)
-                for i in range(0, len(teacher_availabilities), 2):
+                for i in range(0, total_items, 2):
                     start_id = teacher_availabilities[i].sesion_id
                     end_id = teacher_availabilities[i+1].sesion_id
                     

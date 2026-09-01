@@ -212,6 +212,44 @@ def _build_grid(group_id: int, events: list, data: Data, maps: dict) -> tuple:
     return grid, spans
 
 
+def _empty_cell_spans(grid: list, event_spans: list | None = None) -> list:
+    """Rangos de celdas vacías consecutivas por día para unirlas verticalmente.
+
+    Para cada columna de día, agrupa las filas con valor None contiguas en un
+    solo span (mismo formato que _build_grid). Solo une runs de largo >= 2;
+    una celda vacía aislada se mantiene individual. Las filas 3 (RECESO) y 9
+    (ALMUERZO) ya están unidas a lo ancho, por lo que actúan como frontera y
+    nunca se incluyen. Si se indican event_spans, las celdas que forman parte
+    de un evento se tratan como ocupadas (evita fusionar dentro de un bloque).
+    """
+    covered = set()
+    if event_spans:
+        for (r0, c0), (r1, c1) in event_spans:
+            for r in range(r0, r1 + 1):
+                for c in range(c0, c1 + 1):
+                    covered.add((r - 1, c - 1))
+
+    spans = []
+    for day in range(5):
+        run_start = None
+        for row in range(1, 13):
+            if row in (3, 9):
+                if run_start is not None and row - 1 > run_start:
+                    spans.append(((run_start, day + 1), (row - 1, day + 1)))
+                run_start = None
+                continue
+            if grid[row - 1][day] is None and (row - 1, day) not in covered:
+                if run_start is None:
+                    run_start = row
+            else:
+                if run_start is not None and row - 1 > run_start:
+                    spans.append(((run_start, day + 1), (row - 1, day + 1)))
+                run_start = None
+        if run_start is not None and run_start < 12:
+            spans.append(((run_start, day + 1), (12, day + 1)))
+    return spans
+
+
 def _group_title(group_id: int, maps: dict) -> str:
     info = maps["group_info"].get(group_id, {})
     year = _year_label(info.get("year", ""))
@@ -313,10 +351,25 @@ def _group_page_story(
     ))
     for (r0, c0), (r1, c1) in spans:
         table.setStyle(TableStyle([("SPAN", (c0, r0), (c1, r1))]))
+    for (r0, c0), (r1, c1) in _empty_cell_spans(grid, spans):
+        table.setStyle(TableStyle([("SPAN", (c0, r0), (c1, r1))]))
 
     story.append(table)
     story.append(Spacer(1, 10))
-    story.append(Paragraph("Realizado por HOLASA", _footer_style))
+
+    footer = Table(
+        [[Paragraph("Realizado por HOLASA", _footer_left_style),
+          Paragraph("Horario sujeto a cambios", _footer_warn_style)]],
+        colWidths=[380, 380],
+    )
+    footer.setStyle(TableStyle(
+        [
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ]
+    ))
+    story.append(footer)
 
 
 def export_year_pdf(
@@ -440,4 +493,11 @@ _break_style = ParagraphStyle(
 )
 _footer_style = ParagraphStyle(
     "Footer", fontName="Helvetica", fontSize=10, leading=12, alignment=1
+)
+_footer_left_style = ParagraphStyle(
+    "FooterLeft", fontName="Helvetica", fontSize=10, leading=12, alignment=0
+)
+_footer_warn_style = ParagraphStyle(
+    "FooterWarn", fontName="Helvetica-Bold", fontSize=10, leading=12, alignment=2,
+    textColor=colors.red
 )

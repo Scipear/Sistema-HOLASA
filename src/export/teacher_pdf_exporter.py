@@ -18,27 +18,65 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+from reportlab.lib.styles import ParagraphStyle
+
 from src.engine.data import Data
 from src.export.pdf_exporter import (
     ALMUERZO_LABEL,
     DIAS,
     RECESO_LABEL,
     _abbreviate_subject,
-    _break_style,
     _build_data_maps,
-    _cell_paragraph,
-    _cell_style,
-    _course_style,
     _display_row,
     _draw_logo,
-    _footer_style,
-    _head_style,
-    _hour_style,
+    _empty_cell_spans,
+    _footer_left_style,
+    _footer_warn_style,
     _time_label_for_row,
-    _title_style,
     _year_label,
-    _year_style,
 )
+
+# Estilos propios de los horarios de profesor (más compactos que los de curso
+# para que la página completa quepa en una sola hoja A4 apaisada).
+_teacher_title_style = ParagraphStyle(
+    "TeacherTitle", fontName="Helvetica-Bold", fontSize=14, leading=16, alignment=1
+)
+_teacher_year_style = ParagraphStyle(
+    "TeacherYear", fontName="Helvetica-Bold", fontSize=12, leading=14, alignment=1
+)
+_teacher_course_style = ParagraphStyle(
+    "TeacherCourse", fontName="Helvetica-Bold", fontSize=11, leading=13, alignment=1,
+    backColor=colors.HexColor("#1F4E78"), textColor=colors.white
+)
+_teacher_head_style = ParagraphStyle(
+    "TeacherHead", fontName="Helvetica-Bold", fontSize=10, leading=12, alignment=1
+)
+_teacher_hour_style = ParagraphStyle(
+    "TeacherHour", fontName="Helvetica", fontSize=8.5, leading=10, alignment=1
+)
+_teacher_cell_style = ParagraphStyle(
+    "TeacherCell", fontName="Helvetica", fontSize=8, leading=10, alignment=1
+)
+_teacher_break_style = ParagraphStyle(
+    "TeacherBreak", fontName="Helvetica-Bold", fontSize=9, leading=11, alignment=1
+)
+_total_style = ParagraphStyle(
+    "Total", fontName="Helvetica-Bold", fontSize=9, leading=11, alignment=1,
+    textColor=colors.HexColor("#1F4E78"),
+)
+
+
+def _teacher_cell_paragraph(text: str) -> Paragraph:
+    """Espejo de pdf_exporter._cell_paragraph usando el estilo de celda compacto."""
+    if not text:
+        return Paragraph("", _teacher_cell_style)
+    parts = text.split("\n", 1)
+    subject = parts[0]
+    prof = parts[1] if len(parts) > 1 else ""
+    body = f"<b>{subject}</b>"
+    if prof:
+        body += f"<br/>{prof}"
+    return Paragraph(body, _teacher_cell_style)
 
 
 def _teacher_name(teacher_id: int, maps: dict) -> str:
@@ -66,12 +104,14 @@ def _room_label(event_room, group_info: dict, maps: dict) -> str | None:
 
 
 def _cell_text(subject_id: int, group_id: int, event_room, maps: dict) -> str:
-    """Texto de celda: 'Asignatura\nCurso · Aula'."""
+    """Texto de celda: 'Asignatura\nCurso · (Aula)'."""
     subject_names = maps["subject_names"]
     subject = _abbreviate_subject(subject_names.get(subject_id, str(subject_id)))
     curso = _group_short_label(group_id, maps)
     group_info = maps["group_info"].get(group_id, {})
     aula = _room_label(event_room, group_info, maps)
+    if aula:
+        aula = f"({aula})"
 
     line2 = " · ".join(part for part in (curso, aula) if part)
     return f"{subject}\n{line2}" if line2 else subject
@@ -138,14 +178,14 @@ def _teacher_page_story(
     year_label: str,
 ) -> None:
     """Añade los flowables de la página de un profesor (encabezado + grilla + footer)."""
-    story.append(Paragraph("Horario Año Escolar", _title_style))
-    story.append(Paragraph(year_label, _year_style))
-    story.append(Spacer(1, 14))
+    story.append(Paragraph("Horario Año Escolar", _teacher_title_style))
+    story.append(Paragraph(year_label, _teacher_year_style))
+    story.append(Spacer(1, 8))
 
     teacher_band = Table(
-        [[Paragraph(f"Prof. {_teacher_name(teacher_id, maps)}", _course_style)]],
+        [[Paragraph(f"Prof. {_teacher_name(teacher_id, maps)}", _teacher_course_style)]],
         colWidths=[760],
-        rowHeights=[22],
+        rowHeights=[18],
     )
     teacher_band.setStyle(TableStyle(
         [
@@ -162,7 +202,7 @@ def _teacher_page_story(
 
     grid, spans = _build_grid_teacher(teacher_id, events, data, maps)
 
-    header = [Paragraph("Horarios", _head_style)] + [Paragraph(d, _head_style) for d in DIAS]
+    header = [Paragraph("Horarios", _teacher_head_style)] + [Paragraph(d, _teacher_head_style) for d in DIAS]
     rows = [header]
 
     for row in range(1, 13):
@@ -171,15 +211,21 @@ def _teacher_page_story(
             if row not in (3, 9)
             else RECESO_LABEL if row == 3 else ALMUERZO_LABEL
         )
-        line = [Paragraph(time_label, _hour_style)]
+        line = [Paragraph(time_label, _teacher_hour_style)]
         if row in (3, 9):
             label = "RECESO" if row == 3 else "ALMUERZO"
-            line += [Paragraph(label, _break_style)] + [Paragraph("", _cell_style) for _ in range(4)]
+            line += [Paragraph(label, _teacher_break_style)] + [Paragraph("", _teacher_cell_style) for _ in range(4)]
         else:
-            line += [_cell_paragraph(grid[row - 1][day] or "") for day in range(5)]
+            line += [_teacher_cell_paragraph(grid[row - 1][day] or "") for day in range(5)]
         rows.append(line)
 
-    row_heights = [26, 33, 33, 26, 33, 33, 33, 33, 33, 26, 33, 33, 33]
+    total_label = f"Total de horas: {len({
+        (row, c0)
+        for (r0, c0), (r1, c1) in spans
+        for row in range(r0, r1 + 1)
+    })}"
+
+    row_heights = [24, 30, 30, 24, 30, 30, 30, 30, 30, 24, 30, 30, 30]
     table = Table(rows, colWidths=[70, 138, 138, 138, 138, 138], rowHeights=row_heights)
     table.setStyle(TableStyle(
         [
@@ -203,10 +249,46 @@ def _teacher_page_story(
     ))
     for (r0, c0), (r1, c1) in spans:
         table.setStyle(TableStyle([("SPAN", (c0, r0), (c1, r1))]))
+    for (r0, c0), (r1, c1) in _empty_cell_spans(grid, spans):
+        table.setStyle(TableStyle([("SPAN", (c0, r0), (c1, r1))]))
 
     story.append(table)
-    story.append(Spacer(1, 10))
-    story.append(Paragraph("Realizado por HOLASA", _footer_style))
+
+    total_cell = Table(
+        [[Paragraph("", _teacher_hour_style),
+          Paragraph(total_label, _total_style)]],
+        colWidths=[622, 138],
+        rowHeights=[24],
+    )
+    total_cell.setStyle(TableStyle(
+        [
+            ("BACKGROUND", (0, 0), (0, 0), colors.white),
+            ("BACKGROUND", (1, 0), (1, 0), colors.white),
+            ("BOX", (1, 0), (1, 0), 0.6, colors.black),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ]
+    ))
+    story.append(total_cell)
+
+    story.append(Spacer(1, 6))
+
+    footer = Table(
+        [[Paragraph("Realizado por HOLASA", _footer_left_style),
+          Paragraph("Horario sujeto a cambios", _footer_warn_style)]],
+        colWidths=[380, 380],
+    )
+    footer.setStyle(TableStyle(
+        [
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ]
+    ))
+    story.append(footer)
 
 
 def export_teacher_pdf(
@@ -223,8 +305,8 @@ def export_teacher_pdf(
         pagesize=landscape(A4),
         leftMargin=12 * mm,
         rightMargin=12 * mm,
-        topMargin=14 * mm,
-        bottomMargin=12 * mm,
+        topMargin=10 * mm,
+        bottomMargin=10 * mm,
         title=f"Horario Año Escolar {year_label} - Prof. {_teacher_name(teacher_id, maps)}",
         author="HOLASA",
     )

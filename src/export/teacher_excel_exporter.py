@@ -57,12 +57,14 @@ def _room_label(event_room, group_info: dict, maps: dict) -> str | None:
 
 
 def _cell_text(subject_id: int, group_id: int, event_room, maps: dict) -> str:
-    """Texto de celda: 'Asignatura\\nCurso · Aula'."""
+    """Texto de celda: 'Asignatura\nCurso · (Aula)'."""
     subject_names = maps["subject_names"]
     subject = _abbreviate_subject(subject_names.get(subject_id, str(subject_id)))
     curso = _group_short_label(group_id, maps)
     group_info = maps["group_info"].get(group_id, {})
     aula = _room_label(event_room, group_info, maps)
+    if aula:
+        aula = f"({aula})"
 
     line2 = " · ".join(part for part in (curso, aula) if part)
     return f"{subject}\n{line2}" if line2 else subject
@@ -134,7 +136,12 @@ def export_teacher_excel(
     ws.title = "Horario"
     write_sheet_skeleton(ws, f"Prof. {_teacher_name(teacher_id, maps)}", data, year_label)
     grid, spans = _build_grid_teacher(teacher_id, events, data, maps)
-    write_grid(ws, data, grid, spans)
+    total_label = f"Total de horas: {len({
+        (row, c0)
+        for (r0, c0), (r1, c1) in spans
+        for row in range(r0, r1 + 1)
+    })}"
+    write_grid(ws, data, grid, spans, total_label)
     _add_logo(ws)
     wb.save(output_path)
     return output_path

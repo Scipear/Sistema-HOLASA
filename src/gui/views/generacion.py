@@ -338,22 +338,6 @@ def vista_generacion():
                         year_label=dd_anio.value
                     )
 
-                if export_all_excel is not None:
-                    excel_dir = os.path.join(output_dir, "excel")
-                    export_all_excel(
-                        timetable=best_timetable,
-                        output_dir=excel_dir,
-                        year_label=dd_anio.value
-                    )
-
-                if export_all_teachers_excel is not None:
-                    excel_dir = os.path.join(output_dir, "excel")
-                    export_all_teachers_excel(
-                        timetable=best_timetable,
-                        output_dir=excel_dir,
-                        year_label=dd_anio.value
-                    )
-
             badge_estado.visible = True
             
             page.snack_bar = ft.SnackBar(

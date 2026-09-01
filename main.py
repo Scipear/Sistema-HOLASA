@@ -1,4 +1,5 @@
 from src.database.init_db import init_database
+from src.database.seeders import run_seeders
 import flet as ft
 from src.gui.views.dashboard import vista_dashboard
 from src.gui.views.profesores import vista_profesores
@@ -142,4 +143,5 @@ def main(page: ft.Page):
 
 if __name__ == "__main__":
     init_database()
+    run_seeders()
     ft.app(target=main)

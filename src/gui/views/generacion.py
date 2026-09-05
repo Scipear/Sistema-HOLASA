@@ -1,6 +1,7 @@
 import flet as ft
 import threading
 import os
+from datetime import datetime
 
 # Importaciones de tus módulos del proyecto
 try:
@@ -242,9 +243,29 @@ def vista_generacion():
         return config
 
 
+    def _generar_opciones_anio() -> tuple[list, str]:
+        """Genera períodos escolares desde 2025-2026 hasta el año vigente + 1."""
+        hoy = datetime.now()
+        # Año de inicio del período vigente (lógica venezolana: sept-ago)
+        if hoy.month >= 9:
+            anio_vigente_inicio = hoy.year
+        else:
+            anio_vigente_inicio = hoy.year - 1
+
+        anio_inicio_base = 2025  # primer período disponible
+        anio_fin_gen = anio_vigente_inicio + 1  # generar un período hacia adelante
+
+        opciones = [
+            ft.dropdown.Option(f"{y} - {y + 1}")
+            for y in range(anio_inicio_base, anio_fin_gen + 1)
+        ]
+        valor_actual = f"{anio_vigente_inicio} - {anio_vigente_inicio + 1}"
+        return opciones, valor_actual
+
+    _opciones_anio, _valor_anio = _generar_opciones_anio()
     dd_anio = ft.Dropdown(
-        options=[ft.dropdown.Option("2024 - 2025"), ft.dropdown.Option("2025 - 2026")],
-        value="2025 - 2026",
+        options=_opciones_anio,
+        value=_valor_anio,
         border_color="#303346", focused_border_color="#439A5D",
         bgcolor="#13141C", color=ft.colors.WHITE,
         height=48, border_radius=10

@@ -84,7 +84,7 @@ def run_seeders():
         print("[2/5] Insertando Asignaturas y Profesores...")
         asignaturas = [
             AsignaturaModel(nombre="Lengua y Literatura", tipo="General"),
-            AsignaturaModel(nombre="Idiomas", tipo="General"),
+            AsignaturaModel(nombre="Ingles", tipo="General"),
             AsignaturaModel(nombre="Matematicas", tipo="General"),
             AsignaturaModel(nombre="Educación Física", tipo="General"),
             AsignaturaModel(nombre="Biologia, Ambiente y Tecnologia", tipo="General"),

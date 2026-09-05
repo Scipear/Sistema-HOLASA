@@ -6,14 +6,12 @@ from src.engine.classes import Teacher, Subject, Academic_Hour, Room, Group, Eve
 from src.engine.constraints import fitness, groups_subjects, teachers_subjects, rooms_groups, groups_gaps, subject_day, friday_distribution_constraints
 from src.engine.data import Data
 
-data_handler = Data()
-data_handler.load_data()
-academic_hours_limits = data_handler.academic_hours_limits
-academic_hours = data_handler.academic_hours
-teachers = data_handler.teachers
-groups = data_handler.groups
-rooms = data_handler.rooms
-subjects = data_handler.subjects
+academic_hours_limits = {}
+academic_hours = []
+teachers = []
+groups = []
+rooms = []
+subjects = []
 
 TEACHERS_BY_ID = {t.id: t for t in teachers}
 SUBJECTS_BY_ID = {s.id: s for s in subjects}
@@ -33,7 +31,7 @@ def reload_data():
     Llamar antes de cada generación para que los cambios hechos en la interfaz
     (añadir/editar/eliminar profesores, cursos, salones, etc.) sean tomados en cuenta.
     """
-    global data_handler, academic_hours_limits, academic_hours, teachers, groups, rooms, subjects
+    global academic_hours_limits, academic_hours, teachers, groups, rooms, subjects
     global TEACHERS_BY_ID, SUBJECTS_BY_ID, GROUPS_BY_ID
     global SORTED_DAYS, DAY_POSITIONS
 
@@ -1095,6 +1093,7 @@ def mutation(individual: list[Event], blocked_hours_by_group: dict = None):
 
 def main():
 
+    reload_data()
     events = create_events()
     i = 0
     population = create_population(50, events)

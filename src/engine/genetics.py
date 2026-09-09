@@ -26,6 +26,24 @@ GLOBAL_BLOCKED_HOURS = {
     39,
 }
 
+# Días permitidos para grupos de 6to año (Martes, Miércoles y Jueves únicamente)
+_SIXTH_YEAR_ALLOWED_DAY_NAMES = {"martes", "miércoles", "miercoles", "jueves"}
+
+def is_allowed_day_for_group(day_index: int, group_year: int) -> bool:
+    """Retorna False si el grupo es de 6to año y el día no es Martes/Miércoles/Jueves.
+    Para todos los demás años siempre retorna True.
+    """
+    if group_year != 6:
+        return True
+    if not academic_hours:
+        return True
+    # Buscar el nombre del día con ese índice en la lista de horas académicas
+    for ah in academic_hours:
+        if ah.day_index == day_index:
+            day_name = (ah.day or "").strip().lower()
+            return day_name in _SIXTH_YEAR_ALLOWED_DAY_NAMES
+    return False
+
 def reload_data():
     """Recarga todos los datos desde la BD, actualizando las variables globales del motor.
     Llamar antes de cada generación para que los cambios hechos en la interfaz
@@ -228,9 +246,14 @@ def fix_teacher_collisions(timetable: list[Event]) -> list[Event]:
             t_busy = {h for (t_id, h) in teacher_occupancy.keys() if t_id == e.teacher}
 
             candidate_hours = []
+            _grp_obj_ftc = GROUPS_BY_ID.get(e.group)
+            _grp_year_ftc = getattr(_grp_obj_ftc, 'year', None)
             for av in teacher_obj.availabilities:
                 max_start = av.end_idx - e.duration + 1
                 for h_cand in range(av.start_idx, max_start + 1):
+                    _cand_day = academic_hours[h_cand].day_index
+                    if (not is_allowed_day_for_group(_cand_day, _grp_year_ftc)):
+                        continue
                     if (academic_hours[h_cand].day_index == academic_hours[h_cand + e.duration - 1].day_index and
                         not any((h_cand + i) in GLOBAL_BLOCKED_HOURS for i in range(e.duration))):
                         h_range = set(range(h_cand, h_cand + e.duration))
@@ -435,10 +458,14 @@ def restructure_group_schedule(individual: list[Event], group_id: int, bottlenec
         ext_busy = teacher_busy_externally.get(ge.teacher, set())
         
         candidate_hours = []
+        _rgs_grp_obj = GROUPS_BY_ID.get(ge.group)
+        _rgs_grp_year = getattr(_rgs_grp_obj, 'year', None)
         if teacher and teacher.availabilities:
             for av in teacher.availabilities:
                 max_start = av.end_idx - ge.duration + 1
                 for h in range(av.start_idx, max_start + 1):
+                    if not is_allowed_day_for_group(academic_hours[h].day_index, _rgs_grp_year):
+                        continue
                     if academic_hours[h].day_index == academic_hours[h + ge.duration - 1].day_index:
                         candidate_hours.append(h)
 
@@ -571,10 +598,18 @@ def select_best_hour(candidate_hours: list[int], event: Event, taken_hours_group
     best_hour = None
     best_score = float('inf')
 
+    # Obtener año del grupo para la restricción de 6to año
+    _sbh_grp_obj = GROUPS_BY_ID.get(event.group)
+    _sbh_grp_year = getattr(_sbh_grp_obj, 'year', None)
+
     candidates = list(candidate_hours)
     random.shuffle(candidates)
 
     for h in candidates:
+        # 0. Restricción dura: días permitidos para 6to año (Mar/Mié/Jue)
+        if not is_allowed_day_for_group(academic_hours[h].day_index, _sbh_grp_year):
+            continue
+
         # 1. Restricción dura: Prohibido repetir la misma materia el mismo día
         if is_subject_already_on_day(scheduled_subjects, event, h):
             continue
@@ -592,8 +627,13 @@ def select_best_hour(candidate_hours: list[int], event: Event, taken_hours_group
 
     # Fallback si todas las horas repetían materia o generaban alguna penalización
     if best_hour is None and candidate_hours:
+        allowed_fallback = [
+            h for h in candidate_hours
+            if is_allowed_day_for_group(academic_hours[h].day_index, _sbh_grp_year)
+        ]
+        fallback_pool = allowed_fallback if allowed_fallback else candidate_hours
         best_hour = min(
-            candidate_hours,
+            fallback_pool,
             key=lambda h: evaluate_group_day_schedule(taken_hours_group, h, event.duration, event=event)
         )
 
@@ -712,6 +752,9 @@ def create_timetable(events: list[Event], complementary_config: dict = None):
             teachers_block[event.teacher] = set()
 
         found_block = False
+        # Obtener año del grupo para aplicar la restricción de 6to año
+        _ct_grp_obj = GROUPS_BY_ID.get(event.group)
+        _ct_grp_year = getattr(_ct_grp_obj, 'year', None)
 
         # Prioridad 1: Intentar ubicar el evento contiguo a las clases ya existentes del grupo en algún día
         pref_hour = None
@@ -725,6 +768,9 @@ def create_timetable(events: list[Event], complementary_config: dict = None):
             total_ah = len(academic_hours)
 
             for day, h_list in days_map.items():
+                # Respetar restricción de días para 6to año
+                if not is_allowed_day_for_group(day, _ct_grp_year):
+                    continue
                 min_h = min(h_list)
                 max_h = max(h_list)
 
@@ -774,6 +820,8 @@ def create_timetable(events: list[Event], complementary_config: dict = None):
                 for av in teacher.availabilities:
                     max_start = (av.end_idx - event.duration) + 1
                     for h in range(av.start_idx, max_start + 1):
+                        if not is_allowed_day_for_group(academic_hours[h].day_index, _ct_grp_year):
+                            continue
                         if (academic_hours[h].day_index == academic_hours[h + event.duration - 1].day_index and
                             not any((h + i) in GLOBAL_BLOCKED_HOURS for i in range(event.duration))):
                             h_range = set(range(h, h + event.duration))
@@ -812,6 +860,8 @@ def create_timetable(events: list[Event], complementary_config: dict = None):
                     for av in teacher.availabilities:
                         max_start = (av.end_idx - event.duration) + 1
                         for h in range(av.start_idx, max_start + 1):
+                            if not is_allowed_day_for_group(academic_hours[h].day_index, _ct_grp_year):
+                                continue
                             if academic_hours[h].day_index == academic_hours[h + event.duration - 1].day_index:
                                 h_range = set(range(h, h + event.duration))
                                 if (not is_subject_already_on_day(scheduled_subjects, event, h) and
@@ -1023,10 +1073,14 @@ def repair_conflicts(individual: list[Event]) -> list[Event]:
             taken_hours = g_busy.union(t_busy)
 
             candidate_hours = []
+            _rc_grp_obj = GROUPS_BY_ID.get(e.group)
+            _rc_grp_year = getattr(_rc_grp_obj, 'year', None)
             if teacher_obj and teacher_obj.availabilities:
                 for av in teacher_obj.availabilities:
                     max_start = av.end_idx - e.duration + 1
                     for h_cand in range(av.start_idx, max_start + 1):
+                        if not is_allowed_day_for_group(academic_hours[h_cand].day_index, _rc_grp_year):
+                            continue
                         if (academic_hours[h_cand].day_index == academic_hours[h_cand + e.duration - 1].day_index and
                             not any((h_cand + i) in GLOBAL_BLOCKED_HOURS for i in range(e.duration))):
                             h_range = set(range(h_cand, h_cand + e.duration))
@@ -1068,12 +1122,15 @@ def mutation(individual: list[Event], blocked_hours_by_group: dict = None):
         if random.random() < MUTATION_RATE:
             s_hour = event.start_hour
             g_taken = group_taken.get(event.group, set()) - set(range(event.start_hour, event.start_hour + event.duration))
+            _mut_grp_obj = GROUPS_BY_ID.get(event.group)
+            _mut_grp_year = getattr(_mut_grp_obj, 'year', None)
 
             for _ in range(15):
                 new_hour = move_hour(s_hour, event.duration)
                 hours_block = set(range(new_hour, new_hour + event.duration))
 
-                if (not g_taken.intersection(hours_block) and
+                if (is_allowed_day_for_group(academic_hours[new_hour].day_index, _mut_grp_year) and
+                    not g_taken.intersection(hours_block) and
                     is_teacher_available(event.teacher, new_hour, event.duration) and
                     not creates_gap(new_hour, event.duration, g_taken)):
 

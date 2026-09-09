@@ -116,7 +116,7 @@ def rooms_groups(individual: list[Event]):
 
                 if key in rooms_occupation:
                     existing_event = rooms_occupation[key]
-                    score += 0
+                    score += 500
                     collisions.append({
                         "room_id": event.room,
                         "block": block,

@@ -28,6 +28,7 @@ from src.database.repositories import (
     CursoRepository,
     MencionRepository,
     SalonRepository,
+    SalonProfesorRepository,
 )
 from src.database.repositories.salon_curso_repository import SalonCursoRepository
 
@@ -102,6 +103,7 @@ def _build_data_maps(data: Data) -> dict:
     try:
         menciones = {m.id: m.nombre for m in MencionRepository().get_all(db)}
         salon_curso_repo = SalonCursoRepository()
+        salon_profesor_repo = SalonProfesorRepository()
         salon_repo = SalonRepository()
         room_names = {s.id: s.nombre for s in salon_repo.get_all(db)}
 
@@ -118,15 +120,48 @@ def _build_data_maps(data: Data) -> dict:
                 "mencion": menciones.get(curso.mencion_id, ""),
                 "aula": aula,
             }
+
+        teacher_rooms = {}
+        for rel in salon_profesor_repo.get_all(db):
+            salon = salon_repo.get_by_id(db, rel.salon_id)
+            if salon:
+                teacher_rooms[rel.profesor_id] = salon.nombre
     finally:
         db.close()
+
+    # Fallback si data.teachers ya tiene rooms cargados en memoria
+    if hasattr(data, "teachers"):
+        for t in data.teachers:
+            if t.id not in teacher_rooms and getattr(t, "rooms", None):
+                r = t.rooms[0] if isinstance(t.rooms, list) and t.rooms else t.rooms
+                r_name = getattr(r, "name", None) or (room_names.get(getattr(r, "id", None)) if hasattr(r, "id") else None)
+                if r_name:
+                    teacher_rooms[t.id] = r_name
 
     return {
         "group_info": group_info,
         "subject_names": {s.id: s.name for s in data.subjects},
         "teacher_names": {t.id: f"{t.name} {t.last_name}".strip() for t in data.teachers},
+        "teacher_rooms": teacher_rooms,
         "room_names": room_names,
     }
+
+
+def _format_aula(aula_name: str) -> str:
+    """Formatea el nombre del aula para mostrarlo entre paréntesis como '(Aula X)'."""
+    if not aula_name:
+        return ""
+    clean = str(aula_name).strip()
+    if clean.lower().startswith("aula "):
+        clean_num = clean[5:].strip()
+        return f"(Aula {clean_num})"
+    elif clean.lower() == "aula":
+        return "(Aula)"
+    elif clean.lower().startswith("aula"):
+        clean_num = clean[4:].strip()
+        return f"(Aula {clean_num})"
+    else:
+        return f"(Aula {clean})"
 
 
 def _fmt_time(raw: str) -> str:
@@ -167,6 +202,11 @@ def _build_grid(group_id: int, events: list, data: Data, maps: dict) -> tuple:
     """
     subject_names = maps["subject_names"]
     teacher_names = maps["teacher_names"]
+    teacher_rooms = maps.get("teacher_rooms", {})
+    room_names = maps.get("room_names", {})
+    group_info = maps.get("group_info", {}).get(group_id, {})
+    curso_aula = group_info.get("aula")
+
     grid = [[None] * 5 for _ in range(12)]
     spans = []
 
@@ -193,7 +233,26 @@ def _build_grid(group_id: int, events: list, data: Data, maps: dict) -> tuple:
 
         subject_name = _abbreviate_subject(subject_names.get(event.subject, event.subject))
         teacher_name = teacher_names.get(event.teacher, event.teacher)
-        text = f"{subject_name}\nProf. {teacher_name}"
+
+        # Resolver aula del profesor si tiene una asignada
+        aula_str = ""
+        teacher_aula = teacher_rooms.get(event.teacher)
+        if teacher_aula:
+            aula_str = _format_aula(teacher_aula)
+        elif event.room is not None and event.room in room_names:
+            event_room_name = room_names[event.room]
+            if event_room_name != curso_aula:
+                aula_str = _format_aula(event_room_name)
+
+        if teacher_name:
+            prof_part = f"Prof. {teacher_name}"
+            if aula_str:
+                prof_part = f"{prof_part} · {aula_str}"
+            text = f"{subject_name}\n{prof_part}"
+        elif aula_str:
+            text = f"{subject_name}\n{aula_str}"
+        else:
+            text = f"{subject_name}"
 
         # Un evento no puede atravesar RECESO/ALMUERZO: dividimos en
         # segmentos de filas contiguas y cada uno se dibuja por separado.

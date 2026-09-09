@@ -51,7 +51,7 @@ def reload_data():
     """
     global academic_hours_limits, academic_hours, teachers, groups, rooms, subjects
     global TEACHERS_BY_ID, SUBJECTS_BY_ID, GROUPS_BY_ID
-    global SORTED_DAYS, DAY_POSITIONS
+    global SORTED_DAYS, DAY_POSITIONS, data_handler
 
     data_handler = Data()
     data_handler.load_data()
@@ -109,13 +109,14 @@ def random_start_hour(duration: int, teacher_id: int = None) -> int:
 
     # 1. Filtrar los bloques de disponibilidad donde la clase realmente cabe
     valid_availabilities = []
-    for av in teacher.availabilities:
-        # av.start_idx y av.end_idx definen el rango disponible en la matriz global 'academic_hours'
-        max_start = av.end_idx - duration + 1
-        if max_start >= av.start_idx:
-            valid_availabilities.append((av.start_idx, max_start))
+    if teacher is not None and getattr(teacher, 'availabilities', None):
+        for av in teacher.availabilities:
+            # av.start_idx y av.end_idx definen el rango disponible en la matriz global 'academic_hours'
+            max_start = av.end_idx - duration + 1
+            if max_start >= av.start_idx:
+                valid_availabilities.append((av.start_idx, max_start))
 
-    # Si por alguna razón la duración es mayor que cualquier bloque disponible del profesor
+    # Si por alguna razón la duración es mayor que cualquier bloque disponible del profesor o no tiene profesor/disponibilidad
     if not valid_availabilities:
         day_idx = random.choice(SORTED_DAYS)
         min_idx = academic_hours_limits[day_idx]["min"]
@@ -149,11 +150,13 @@ def is_teacher_available(teacher, start_hour: int, duration: int) -> bool:
     if teacher is None:
         return True
 
-    teacher = TEACHERS_BY_ID.get(teacher)
+    teacher_obj = TEACHERS_BY_ID.get(teacher) if not hasattr(teacher, 'availabilities') else teacher
+    if teacher_obj is None or not getattr(teacher_obj, 'availabilities', None):
+        return True
 
     event_end_hour = start_hour + duration - 1
     
-    for av in teacher.availabilities:
+    for av in teacher_obj.availabilities:
         if start_hour >= av.start_idx and event_end_hour <= av.end_idx:
             return True
             

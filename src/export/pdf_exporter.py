@@ -237,12 +237,12 @@ def _build_grid(group_id: int, events: list, data: Data, maps: dict) -> tuple:
         # Resolver aula del profesor si tiene una asignada
         aula_str = ""
         teacher_aula = teacher_rooms.get(event.teacher)
-        if teacher_aula:
-            aula_str = _format_aula(teacher_aula)
-        elif event.room is not None and event.room in room_names:
+        if event.room is not None and event.room in room_names:
             event_room_name = room_names[event.room]
             if event_room_name != curso_aula:
                 aula_str = _format_aula(event_room_name)
+        elif teacher_aula:
+            aula_str = _format_aula(teacher_aula)
 
         if teacher_name:
             prof_part = f"Prof. {teacher_name}"

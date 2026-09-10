@@ -62,10 +62,11 @@ class Data():
     def load_data(self):
         """Carga y adapta los datos desde la BD SQLite hacia las variables globales del motor."""
         db = SessionLocal()
+        taller_room_type = "Taller"
 
         try:
             rooms_db = SalonRepository().get_all(db)
-            self.rooms = [Room(id=s.id, name=s.nombre) for s in rooms_db]
+            self.rooms = [Room(id=s.id, name=s.nombre, is_taller=s.tipo.strip().lower() == taller_room_type.lower() if s.tipo else False) for s in rooms_db]
             rooms_dict = {r.id: r for r in self.rooms}
 
             academic_hours_db = SesionRepository().get_all(db)

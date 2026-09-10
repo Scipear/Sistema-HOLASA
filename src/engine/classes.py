@@ -31,9 +31,10 @@ class Availability:
         self.end_idx = end_idx #Indice virtual final
 
 class Room():
-    def __init__(self, id:int, name: str):
+    def __init__(self, id:int, name: str, is_taller:bool):
         self.id = id
         self.name = name
+        self.is_taller = is_taller
 
 class Group():
     def __init__(self, id: int, year: int, name: str, subjects: list[Subject], rooms: list[Room] = None):

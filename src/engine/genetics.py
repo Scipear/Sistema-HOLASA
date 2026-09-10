@@ -659,19 +659,29 @@ def create_events():
             teacher = None
             room = None
             left_hours = subject.hours
-            
+            is_taller = subject.subject_type == "(Taller) Formacion Cientifica, Tecnologica y Productiva"
+
             if subject.teacher is not None:
                 teacher = subject.teacher
 
             if teacher is not None and teacher.rooms is not None:
                 room = random.choice(teacher.rooms)
+            
+            if group.rooms is not None:
+                if len(group.rooms) > 1:
+                    for g_room in group.rooms:
+                        print(g_room.name, g_room.is_taller, is_taller)
+                        if is_taller and g_room.is_taller:
+                            print(f"Entro a taller porque es taller")
+                            room = g_room
+                            break
 
-            elif group.rooms is not None:
-                room = random.choice(group.rooms)
+                if room is None:
+                    n_rooms = [g_room for g_room in group.rooms if not g_room.is_taller]
+                    room = random.choice(n_rooms)
 
             teacher_name = teacher.name.strip() if teacher and teacher.name else ""
             is_yeesika = "yeesika" in teacher_name.lower()
-            is_taller = subject.subject_type == "(Taller) Formacion Cientifica, Tecnologica y Productiva"
 
             while left_hours > 0:
                 if is_yeesika and not is_taller:
@@ -954,6 +964,11 @@ def mutate_rooms(individual: list[Event], room_mutation_rate: float = 0.10) -> l
         if not group or not group.rooms or len(group.rooms) <= 1:
             continue
 
+        subject = SUBJECTS_BY_ID.get(event.subject)
+        if subject is None:
+            continue
+
+        subject_is_taller = subject.subject_type == "(Taller) Formacion Cientifica, Tecnologica y Productiva"
         event_range = range(event.start_hour, event.start_hour + event.duration)
 
         # 2. Comprobar si el aula actual tiene colisión con otro grupo en ese bloque horario
@@ -980,7 +995,7 @@ def mutate_rooms(individual: list[Event], room_mutation_rate: float = 0.10) -> l
                         is_free = False
                         break
 
-                if is_free:
+                if is_free and not candidate_room.is_taller:
                     free_candidate_rooms.append(candidate_room)
 
             # 4. Seleccionar nueva aula

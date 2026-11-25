@@ -1,4 +1,5 @@
 from datetime import datetime
+import math
 from src.database.connection import SessionLocal
 from src.database.repositories import (
     ProfesorRepository,
@@ -62,10 +63,11 @@ class Data():
     def load_data(self):
         """Carga y adapta los datos desde la BD SQLite hacia las variables globales del motor."""
         db = SessionLocal()
+        taller_room_type = "Taller"
 
         try:
             rooms_db = SalonRepository().get_all(db)
-            self.rooms = [Room(id=s.id, name=s.nombre) for s in rooms_db]
+            self.rooms = [Room(id=s.id, name=s.nombre, is_taller=s.tipo.strip().lower() == taller_room_type.lower() if s.tipo else False) for s in rooms_db]
             rooms_dict = {r.id: r for r in self.rooms}
 
             academic_hours_db = SesionRepository().get_all(db)
@@ -169,6 +171,9 @@ class Data():
                         teacher=assigned_teacher
                     )
 
+                    if assigned_teacher is not None:
+                        assigned_teacher.assigned_subjects.append(subj_obj)
+
                     group_subjects.append(subj_obj)
                     self.subjects.append(subj_obj)
                 
@@ -182,7 +187,65 @@ class Data():
                 )
                 self.groups.append(group_obj)
 
-            print(f"✅ Carga exitosa desde BD: {len(self.teachers)} profesores, {len(self.groups)} cursos, {len(self.rooms)} salones.")
+            # Cálculo de horas semanales, tipología y límites diarios para cada profesor
+            def _is_taller_or_proyecto(subj: Subject) -> bool:
+                s_type = (subj.subject_type or "").lower()
+                s_name = (subj.name or "").lower()
+                return "taller" in s_type or "taller" in s_name or "proyecto" in s_type or "proyecto" in s_name or "formacion cientifica" in s_type
+
+            for t in self.teachers:
+                t.weekly_hours = sum(s.hours for s in t.assigned_subjects)
+                
+                if not t.assigned_subjects:
+                    t.teacher_type = "general"
+                    t.min_daily_hours = 0
+                    t.max_daily_hours = 0
+                    continue
+
+                has_tp = any(_is_taller_or_proyecto(s) for s in t.assigned_subjects)
+                has_gen = any(not _is_taller_or_proyecto(s) for s in t.assigned_subjects)
+
+                if has_tp and has_gen:
+                    t.teacher_type = "mixto"
+                elif has_tp:
+                    t.teacher_type = "taller_proyecto"
+                else:
+                    t.teacher_type = "general"
+
+                # Cálculo dinámico de límites diarios
+                if t.teacher_type != "general":
+                    t.min_daily_hours = None
+                    t.max_daily_hours = None
+                else:
+                    w = t.weekly_hours
+                    if w == 0:
+                        t.min_daily_hours = 0
+                        t.max_daily_hours = 0
+                    elif w <= 4:
+                        t.min_daily_hours = min(2, w)
+                        t.max_daily_hours = w
+                    elif w <= 8:
+                        t.min_daily_hours = 2
+                        t.max_daily_hours = min(6, w)
+                    else:
+                        avg = w / 5.0
+                        lower_even = int(math.floor(avg / 2.0) * 2)
+                        upper_even = int(math.ceil(avg / 2.0) * 2)
+
+                        min_daily = max(4, lower_even)
+                        max_daily = min(10, upper_even)
+
+                        if min_daily == max_daily:
+                            min_daily = max(4, lower_even - 2)
+                            max_daily = min(10, upper_even + 2)
+
+                        if min_daily > max_daily:
+                            min_daily = max(4, max_daily - 2)
+
+                        t.min_daily_hours = min(min_daily, w)
+                        t.max_daily_hours = min(max_daily, 10)
+
+            print(f"[DATA] Carga exitosa desde BD: {len(self.teachers)} profesores, {len(self.groups)} cursos, {len(self.rooms)} salones.")
         
         finally:
             db.close()

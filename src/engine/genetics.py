@@ -3,17 +3,15 @@ import random
 import copy
 import time
 from src.engine.classes import Teacher, Subject, Academic_Hour, Room, Group, Event, Availability
-from src.engine.constraints import fitness, groups_subjects, teachers_subjects, rooms_groups, groups_gaps, subject_day, friday_distribution_constraints
+from src.engine.constraints import fitness, groups_subjects, teachers_subjects, rooms_groups, groups_gaps, subject_day, friday_distribution_constraints, teachers_gaps_and_load
 from src.engine.data import Data
 
-data_handler = Data()
-data_handler.load_data()
-academic_hours_limits = data_handler.academic_hours_limits
-academic_hours = data_handler.academic_hours
-teachers = data_handler.teachers
-groups = data_handler.groups
-rooms = data_handler.rooms
-subjects = data_handler.subjects
+academic_hours_limits = {}
+academic_hours = []
+teachers = []
+groups = []
+rooms = []
+subjects = []
 
 TEACHERS_BY_ID = {t.id: t for t in teachers}
 SUBJECTS_BY_ID = {s.id: s for s in subjects}
@@ -28,14 +26,32 @@ GLOBAL_BLOCKED_HOURS = {
     39,
 }
 
+# Días permitidos para grupos de 6to año (Martes, Miércoles y Jueves únicamente)
+_SIXTH_YEAR_ALLOWED_DAY_NAMES = {"martes", "miércoles", "miercoles", "jueves"}
+
+def is_allowed_day_for_group(day_index: int, group_year: int) -> bool:
+    """Retorna False si el grupo es de 6to año y el día no es Martes/Miércoles/Jueves.
+    Para todos los demás años siempre retorna True.
+    """
+    if group_year != 6:
+        return True
+    if not academic_hours:
+        return True
+    # Buscar el nombre del día con ese índice en la lista de horas académicas
+    for ah in academic_hours:
+        if ah.day_index == day_index:
+            day_name = (ah.day or "").strip().lower()
+            return day_name in _SIXTH_YEAR_ALLOWED_DAY_NAMES
+    return False
+
 def reload_data():
     """Recarga todos los datos desde la BD, actualizando las variables globales del motor.
     Llamar antes de cada generación para que los cambios hechos en la interfaz
     (añadir/editar/eliminar profesores, cursos, salones, etc.) sean tomados en cuenta.
     """
-    global data_handler, academic_hours_limits, academic_hours, teachers, groups, rooms, subjects
+    global academic_hours_limits, academic_hours, teachers, groups, rooms, subjects
     global TEACHERS_BY_ID, SUBJECTS_BY_ID, GROUPS_BY_ID
-    global SORTED_DAYS, DAY_POSITIONS
+    global SORTED_DAYS, DAY_POSITIONS, data_handler
 
     data_handler = Data()
     data_handler.load_data()
@@ -93,13 +109,14 @@ def random_start_hour(duration: int, teacher_id: int = None) -> int:
 
     # 1. Filtrar los bloques de disponibilidad donde la clase realmente cabe
     valid_availabilities = []
-    for av in teacher.availabilities:
-        # av.start_idx y av.end_idx definen el rango disponible en la matriz global 'academic_hours'
-        max_start = av.end_idx - duration + 1
-        if max_start >= av.start_idx:
-            valid_availabilities.append((av.start_idx, max_start))
+    if teacher is not None and getattr(teacher, 'availabilities', None):
+        for av in teacher.availabilities:
+            # av.start_idx y av.end_idx definen el rango disponible en la matriz global 'academic_hours'
+            max_start = av.end_idx - duration + 1
+            if max_start >= av.start_idx:
+                valid_availabilities.append((av.start_idx, max_start))
 
-    # Si por alguna razón la duración es mayor que cualquier bloque disponible del profesor
+    # Si por alguna razón la duración es mayor que cualquier bloque disponible del profesor o no tiene profesor/disponibilidad
     if not valid_availabilities:
         day_idx = random.choice(SORTED_DAYS)
         min_idx = academic_hours_limits[day_idx]["min"]
@@ -133,11 +150,13 @@ def is_teacher_available(teacher, start_hour: int, duration: int) -> bool:
     if teacher is None:
         return True
 
-    teacher = TEACHERS_BY_ID.get(teacher)
+    teacher_obj = TEACHERS_BY_ID.get(teacher) if not hasattr(teacher, 'availabilities') else teacher
+    if teacher_obj is None or not getattr(teacher_obj, 'availabilities', None):
+        return True
 
     event_end_hour = start_hour + duration - 1
     
-    for av in teacher.availabilities:
+    for av in teacher_obj.availabilities:
         if start_hour >= av.start_idx and event_end_hour <= av.end_idx:
             return True
             
@@ -230,9 +249,14 @@ def fix_teacher_collisions(timetable: list[Event]) -> list[Event]:
             t_busy = {h for (t_id, h) in teacher_occupancy.keys() if t_id == e.teacher}
 
             candidate_hours = []
+            _grp_obj_ftc = GROUPS_BY_ID.get(e.group)
+            _grp_year_ftc = getattr(_grp_obj_ftc, 'year', None)
             for av in teacher_obj.availabilities:
                 max_start = av.end_idx - e.duration + 1
                 for h_cand in range(av.start_idx, max_start + 1):
+                    _cand_day = academic_hours[h_cand].day_index
+                    if (not is_allowed_day_for_group(_cand_day, _grp_year_ftc)):
+                        continue
                     if (academic_hours[h_cand].day_index == academic_hours[h_cand + e.duration - 1].day_index and
                         not any((h_cand + i) in GLOBAL_BLOCKED_HOURS for i in range(e.duration))):
                         h_range = set(range(h_cand, h_cand + e.duration))
@@ -242,7 +266,7 @@ def fix_teacher_collisions(timetable: list[Event]) -> list[Event]:
                             candidate_hours.append(h_cand)
 
             if candidate_hours:
-                best_h = select_best_hour(candidate_hours, e, g_busy, scheduled_subjects)
+                best_h = select_best_hour(candidate_hours, e, g_busy, scheduled_subjects, taken_hours_teacher=t_busy)
                 if best_h is not None:
                     e.start_hour = best_h
                     e_range = range(e.start_hour, e.start_hour + e.duration)
@@ -437,10 +461,14 @@ def restructure_group_schedule(individual: list[Event], group_id: int, bottlenec
         ext_busy = teacher_busy_externally.get(ge.teacher, set())
         
         candidate_hours = []
+        _rgs_grp_obj = GROUPS_BY_ID.get(ge.group)
+        _rgs_grp_year = getattr(_rgs_grp_obj, 'year', None)
         if teacher and teacher.availabilities:
             for av in teacher.availabilities:
                 max_start = av.end_idx - ge.duration + 1
                 for h in range(av.start_idx, max_start + 1):
+                    if not is_allowed_day_for_group(academic_hours[h].day_index, _rgs_grp_year):
+                        continue
                     if academic_hours[h].day_index == academic_hours[h + ge.duration - 1].day_index:
                         candidate_hours.append(h)
 
@@ -566,23 +594,95 @@ def evaluate_group_day_schedule(
 
     return penalty
 
-def select_best_hour(candidate_hours: list[int], event: Event, taken_hours_group: set[int], scheduled_subjects: set) -> int:
+def evaluate_teacher_day_schedule(
+    teacher_taken_hours: set[int],
+    candidate_h: int,
+    duration: int,
+    teacher_id: int = None
+) -> float:
+    """Calcula la penalización del horario de un profesor en un día:
+    - Baches/huecos intermedios entre clases del profesor el mismo día.
+    - Respeto de límites diarios (min_daily_hours y max_daily_hours) si no es taller/proyecto puro.
+    """
+    if teacher_id is None:
+        return 0.0
+
+    teacher_obj = TEACHERS_BY_ID.get(teacher_id)
+    if not teacher_obj:
+        return 0.0
+
+    day_idx = academic_hours[candidate_h].day_index
+    t_type = getattr(teacher_obj, 'teacher_type', 'general')
+    min_dh = getattr(teacher_obj, 'min_daily_hours', None)
+    max_dh = getattr(teacher_obj, 'max_daily_hours', None)
+
+    # 1. Obtener todas las horas del profesor ese día incluyendo el evento candidato
+    day_t_hours = [
+        h for h in (teacher_taken_hours or set())
+        if academic_hours[h].day_index == day_idx
+    ]
+    new_event_hours = list(range(candidate_h, candidate_h + duration))
+    all_day_hours = sorted(set(day_t_hours + new_event_hours))
+
+    if not all_day_hours:
+        return 0.0
+
+    first_hour = all_day_hours[0]
+    last_hour = all_day_hours[-1]
+    total_hours_today = len(all_day_hours)
+
+    span_count = last_hour - first_hour + 1
+    gaps_count = span_count - total_hours_today
+
+    penalty = 0.0
+
+    # Penalizar baches / ventanas libres en la jornada del profesor
+    if gaps_count > 0:
+        penalty += gaps_count * 350.0
+
+    # Si es profesor general o mixto, evaluar límites diarios
+    if t_type != "taller_proyecto":
+        if max_dh is not None and max_dh > 0 and total_hours_today > max_dh:
+            penalty += (total_hours_today - max_dh) * 300.0
+
+        if min_dh is not None and min_dh > 0 and total_hours_today < min_dh:
+            penalty += (min_dh - total_hours_today) * 150.0
+
+    return penalty
+
+def select_best_hour(
+    candidate_hours: list[int],
+    event: Event,
+    taken_hours_group: set[int],
+    scheduled_subjects: set,
+    taken_hours_teacher: set[int] = None
+) -> int:
     """Selecciona la hora candidata que NO repita materia el mismo día
-    y que presente el menor nivel de penalización según la jornada del grupo."""
+    y que minimice conjuntamente la penalización de la jornada del grupo y del profesor."""
     
     best_hour = None
     best_score = float('inf')
+
+    # Obtener año del grupo para la restricción de 6to año
+    _sbh_grp_obj = GROUPS_BY_ID.get(event.group)
+    _sbh_grp_year = getattr(_sbh_grp_obj, 'year', None)
 
     candidates = list(candidate_hours)
     random.shuffle(candidates)
 
     for h in candidates:
+        # 0. Restricción dura: días permitidos para 6to año (Mar/Mié/Jue)
+        if not is_allowed_day_for_group(academic_hours[h].day_index, _sbh_grp_year):
+            continue
+
         # 1. Restricción dura: Prohibido repetir la misma materia el mismo día
         if is_subject_already_on_day(scheduled_subjects, event, h):
             continue
             
-        # 2. Evaluar el cumplimiento de las reglas del horario del alumno
-        score = evaluate_group_day_schedule(taken_hours_group, h, event.duration, event=event)
+        # 2. Evaluar el cumplimiento de las reglas del horario del alumno y profesor
+        g_score = evaluate_group_day_schedule(taken_hours_group, h, event.duration, event=event)
+        t_score = evaluate_teacher_day_schedule(taken_hours_teacher, h, event.duration, event.teacher)
+        score = g_score + 0.8 * t_score
 
         if score < best_score:
             best_score = score
@@ -594,12 +694,21 @@ def select_best_hour(candidate_hours: list[int], event: Event, taken_hours_group
 
     # Fallback si todas las horas repetían materia o generaban alguna penalización
     if best_hour is None and candidate_hours:
+        allowed_fallback = [
+            h for h in candidate_hours
+            if is_allowed_day_for_group(academic_hours[h].day_index, _sbh_grp_year)
+        ]
+        fallback_pool = allowed_fallback if allowed_fallback else candidate_hours
         best_hour = min(
-            candidate_hours,
-            key=lambda h: evaluate_group_day_schedule(taken_hours_group, h, event.duration, event=event)
+            fallback_pool,
+            key=lambda h: (
+                evaluate_group_day_schedule(taken_hours_group, h, event.duration, event=event) +
+                0.8 * evaluate_teacher_day_schedule(taken_hours_teacher, h, event.duration, event.teacher)
+            )
         )
 
     return best_hour
+
 
 def create_events():
     event_list = []
@@ -618,19 +727,29 @@ def create_events():
             teacher = None
             room = None
             left_hours = subject.hours
-            
+            is_taller = subject.subject_type == "(Taller) Formacion Cientifica, Tecnologica y Productiva"
+
             if subject.teacher is not None:
                 teacher = subject.teacher
 
             if teacher is not None and teacher.rooms is not None:
                 room = random.choice(teacher.rooms)
+            
+            if group.rooms is not None:
+                if len(group.rooms) > 1:
+                    for g_room in group.rooms:
+                        print(g_room.name, g_room.is_taller, is_taller)
+                        if is_taller and g_room.is_taller:
+                            print(f"Entro a taller porque es taller")
+                            room = g_room
+                            break
 
-            elif group.rooms is not None:
-                room = random.choice(group.rooms)
+                if room is None:
+                    n_rooms = [g_room for g_room in group.rooms if not g_room.is_taller]
+                    room = random.choice(n_rooms)
 
             teacher_name = teacher.name.strip() if teacher and teacher.name else ""
             is_yeesika = "yeesika" in teacher_name.lower()
-            is_taller = subject.subject_type == "(Taller) Formacion Cientifica, Tecnologica y Productiva"
 
             while left_hours > 0:
                 if is_yeesika and not is_taller:
@@ -714,6 +833,9 @@ def create_timetable(events: list[Event], complementary_config: dict = None):
             teachers_block[event.teacher] = set()
 
         found_block = False
+        # Obtener año del grupo para aplicar la restricción de 6to año
+        _ct_grp_obj = GROUPS_BY_ID.get(event.group)
+        _ct_grp_year = getattr(_ct_grp_obj, 'year', None)
 
         # Prioridad 1: Intentar ubicar el evento contiguo a las clases ya existentes del grupo en algún día
         pref_hour = None
@@ -727,6 +849,9 @@ def create_timetable(events: list[Event], complementary_config: dict = None):
             total_ah = len(academic_hours)
 
             for day, h_list in days_map.items():
+                # Respetar restricción de días para 6to año
+                if not is_allowed_day_for_group(day, _ct_grp_year):
+                    continue
                 min_h = min(h_list)
                 max_h = max(h_list)
 
@@ -755,7 +880,10 @@ def create_timetable(events: list[Event], complementary_config: dict = None):
             if valid_candidates:
                 pref_hour = min(
                     valid_candidates,
-                    key=lambda ch: evaluate_group_day_schedule(groups_block[event.group], ch, event.duration, event=event)
+                    key=lambda ch: (
+                        evaluate_group_day_schedule(groups_block[event.group], ch, event.duration, event=event) +
+                        0.8 * evaluate_teacher_day_schedule(teachers_block.get(event.teacher, set()), ch, event.duration, event.teacher)
+                    )
                 )
 
         if pref_hour is not None:
@@ -776,6 +904,8 @@ def create_timetable(events: list[Event], complementary_config: dict = None):
                 for av in teacher.availabilities:
                     max_start = (av.end_idx - event.duration) + 1
                     for h in range(av.start_idx, max_start + 1):
+                        if not is_allowed_day_for_group(academic_hours[h].day_index, _ct_grp_year):
+                            continue
                         if (academic_hours[h].day_index == academic_hours[h + event.duration - 1].day_index and
                             not any((h + i) in GLOBAL_BLOCKED_HOURS for i in range(event.duration))):
                             h_range = set(range(h, h + event.duration))
@@ -788,7 +918,10 @@ def create_timetable(events: list[Event], complementary_config: dict = None):
             if possible_hours:
                 event.start_hour = min(
                     possible_hours,
-                    key=lambda h: evaluate_group_day_schedule(groups_block[event.group], h, event.duration, event=event)
+                    key=lambda h: (
+                        evaluate_group_day_schedule(groups_block[event.group], h, event.duration, event=event) +
+                        0.8 * evaluate_teacher_day_schedule(teachers_block.get(event.teacher, set()), h, event.duration, event.teacher)
+                    )
                 )
                 found_block = True
             else:
@@ -814,6 +947,8 @@ def create_timetable(events: list[Event], complementary_config: dict = None):
                     for av in teacher.availabilities:
                         max_start = (av.end_idx - event.duration) + 1
                         for h in range(av.start_idx, max_start + 1):
+                            if not is_allowed_day_for_group(academic_hours[h].day_index, _ct_grp_year):
+                                continue
                             if academic_hours[h].day_index == academic_hours[h + event.duration - 1].day_index:
                                 h_range = set(range(h, h + event.duration))
                                 if (not is_subject_already_on_day(scheduled_subjects, event, h) and
@@ -823,8 +958,12 @@ def create_timetable(events: list[Event], complementary_config: dict = None):
                 
                 event.start_hour = min(
                     fallback_hours,
-                    key=lambda h: evaluate_group_day_schedule(groups_block[event.group], h, event.duration, event=event)
+                    key=lambda h: (
+                        evaluate_group_day_schedule(groups_block[event.group], h, event.duration, event=event) +
+                        0.8 * evaluate_teacher_day_schedule(teachers_block.get(event.teacher, set()), h, event.duration, event.teacher)
+                    )
                 ) if fallback_hours else random_start_hour(event.duration, event.teacher)
+
 
             event_hours = set(range(event.start_hour, event.start_hour + event.duration))
             groups_block[event.group].update(event_hours)
@@ -903,6 +1042,11 @@ def mutate_rooms(individual: list[Event], room_mutation_rate: float = 0.10) -> l
         if not group or not group.rooms or len(group.rooms) <= 1:
             continue
 
+        subject = SUBJECTS_BY_ID.get(event.subject)
+        if subject is None:
+            continue
+
+        subject_is_taller = subject.subject_type == "(Taller) Formacion Cientifica, Tecnologica y Productiva"
         event_range = range(event.start_hour, event.start_hour + event.duration)
 
         # 2. Comprobar si el aula actual tiene colisión con otro grupo en ese bloque horario
@@ -929,7 +1073,7 @@ def mutate_rooms(individual: list[Event], room_mutation_rate: float = 0.10) -> l
                         is_free = False
                         break
 
-                if is_free:
+                if is_free and not candidate_room.is_taller:
                     free_candidate_rooms.append(candidate_room)
 
             # 4. Seleccionar nueva aula
@@ -1025,10 +1169,14 @@ def repair_conflicts(individual: list[Event]) -> list[Event]:
             taken_hours = g_busy.union(t_busy)
 
             candidate_hours = []
+            _rc_grp_obj = GROUPS_BY_ID.get(e.group)
+            _rc_grp_year = getattr(_rc_grp_obj, 'year', None)
             if teacher_obj and teacher_obj.availabilities:
                 for av in teacher_obj.availabilities:
                     max_start = av.end_idx - e.duration + 1
                     for h_cand in range(av.start_idx, max_start + 1):
+                        if not is_allowed_day_for_group(academic_hours[h_cand].day_index, _rc_grp_year):
+                            continue
                         if (academic_hours[h_cand].day_index == academic_hours[h_cand + e.duration - 1].day_index and
                             not any((h_cand + i) in GLOBAL_BLOCKED_HOURS for i in range(e.duration))):
                             h_range = set(range(h_cand, h_cand + e.duration))
@@ -1037,7 +1185,7 @@ def repair_conflicts(individual: list[Event]) -> list[Event]:
                                 candidate_hours.append(h_cand)
 
             if candidate_hours:
-                best_h = select_best_hour(candidate_hours, e, g_busy, scheduled_subjects)
+                best_h = select_best_hour(candidate_hours, e, g_busy, scheduled_subjects, taken_hours_teacher=t_busy)
                 if best_h is not None:
                     e.start_hour = best_h
                     e_range = range(e.start_hour, e.start_hour + e.duration)
@@ -1070,12 +1218,15 @@ def mutation(individual: list[Event], blocked_hours_by_group: dict = None):
         if random.random() < MUTATION_RATE:
             s_hour = event.start_hour
             g_taken = group_taken.get(event.group, set()) - set(range(event.start_hour, event.start_hour + event.duration))
+            _mut_grp_obj = GROUPS_BY_ID.get(event.group)
+            _mut_grp_year = getattr(_mut_grp_obj, 'year', None)
 
             for _ in range(15):
                 new_hour = move_hour(s_hour, event.duration)
                 hours_block = set(range(new_hour, new_hour + event.duration))
 
-                if (not g_taken.intersection(hours_block) and
+                if (is_allowed_day_for_group(academic_hours[new_hour].day_index, _mut_grp_year) and
+                    not g_taken.intersection(hours_block) and
                     is_teacher_available(event.teacher, new_hour, event.duration) and
                     not creates_gap(new_hour, event.duration, g_taken)):
 
@@ -1095,6 +1246,7 @@ def mutation(individual: list[Event], blocked_hours_by_group: dict = None):
 
 def main():
 
+    reload_data()
     events = create_events()
     i = 0
     population = create_population(50, events)
@@ -1102,7 +1254,7 @@ def main():
     count = 0
 
     while i < 250:
-        scores = fitness(population, academic_hours, academic_hours_limits)
+        scores = fitness(population, academic_hours, academic_hours_limits, GROUPS_BY_ID, SUBJECTS_BY_ID, TEACHERS_BY_ID)
         fitness_population = list(zip(scores, population))
 
         if i == 0:
@@ -1133,7 +1285,7 @@ def main():
         i += 1
         past_value = fitness_population[0][0]
     
-    scores = fitness(population, academic_hours, academic_hours_limits)
+    scores = fitness(population, academic_hours, academic_hours_limits, GROUPS_BY_ID, SUBJECTS_BY_ID, TEACHERS_BY_ID)
     fitness_population = list(zip(scores, population))
     fitness_population.sort(key=lambda x: x[0])
     print("generacion 100 ordenada")
@@ -1178,6 +1330,12 @@ def main():
 
         print(f"  - Grupo {fail['group']} ({dias_semana[fail['day']]}): {fail['type']}. {detalle}.")
 
+    print(f"\n[!] Baches y Carga Diaria de Profesores: {len(final_report.get('teacher_gaps', []))}")
+    for fail in final_report.get('teacher_gaps', []):
+        t_nombre = fail.get('teacher_name', f"Profesor {fail.get('teacher_id')}")
+        dia_nom = dias_semana[fail['day']] if 0 <= fail['day'] < len(dias_semana) else str(fail['day'])
+        print(f"  - {t_nombre} ({dia_nom}): {fail['type']}. Penalización: {fail.get('penalty', 0)}")
+
     print(f"\n[!] Materias Repetidas el Mismo Día: {len(final_report['subject_duplications'])}")
     for fail in final_report['subject_duplications']:
         print(f"  - Grupo {fail['group']} ({dias_semana[fail['day']]}): La materia {fail['subject']} se imparte de forma fragmentada en los Eventos {fail['event_1_id']} y {fail['event_2_id']}.")
@@ -1206,17 +1364,20 @@ def evaluate_and_report(best_individual: list[Event]):
     gap_score, gaps_report = groups_gaps(best_individual, academic_hours, academic_hours_limits)
     sub_score, subject_duplications = subject_day(best_individual, academic_hours)
     fri_score, friday_report = friday_distribution_constraints(best_individual, academic_hours, academic_hours_limits, GROUPS_BY_ID, SUBJECTS_BY_ID)
+    t_gap_score, teacher_gaps_report = teachers_gaps_and_load(best_individual, academic_hours, academic_hours_limits, TEACHERS_BY_ID)
     
     report = {
-        "total_fitness": g_score + t_score + r_score + gap_score + sub_score + fri_score,
+        "total_fitness": g_score + t_score + r_score + gap_score + sub_score + fri_score + t_gap_score,
         "group_collisions": group_collisions,
         "teacher_collisions": teacher_collisions,
         "room_collisions": room_collisions,
         "gaps": gaps_report,
+        "teacher_gaps": teacher_gaps_report,
         "subject_duplications": subject_duplications,
         "friday_distribution": friday_report
     }
     return report
+
 
 if __name__ == "__main__":
     start = time.perf_counter()

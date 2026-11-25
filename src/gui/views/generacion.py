@@ -1,6 +1,7 @@
 import flet as ft
 import threading
 import os
+from datetime import datetime
 
 # Importaciones de tus módulos del proyecto
 try:
@@ -242,9 +243,29 @@ def vista_generacion():
         return config
 
 
+    def _generar_opciones_anio() -> tuple[list, str]:
+        """Genera períodos escolares desde 2025-2026 hasta el año vigente + 1."""
+        hoy = datetime.now()
+        # Año de inicio del período vigente (lógica venezolana: sept-ago)
+        if hoy.month >= 9:
+            anio_vigente_inicio = hoy.year
+        else:
+            anio_vigente_inicio = hoy.year - 1
+
+        anio_inicio_base = 2025  # primer período disponible
+        anio_fin_gen = anio_vigente_inicio + 1  # generar un período hacia adelante
+
+        opciones = [
+            ft.dropdown.Option(f"{y} - {y + 1}")
+            for y in range(anio_inicio_base, anio_fin_gen + 1)
+        ]
+        valor_actual = f"{anio_vigente_inicio} - {anio_vigente_inicio + 1}"
+        return opciones, valor_actual
+
+    _opciones_anio, _valor_anio = _generar_opciones_anio()
     dd_anio = ft.Dropdown(
-        options=[ft.dropdown.Option("2024 - 2025"), ft.dropdown.Option("2025 - 2026")],
-        value="2025 - 2026",
+        options=_opciones_anio,
+        value=_valor_anio,
         border_color="#303346", focused_border_color="#439A5D",
         bgcolor="#13141C", color=ft.colors.WHITE,
         height=48, border_radius=10
@@ -632,6 +653,23 @@ def vista_generacion():
 
         items_reporte.append(helper_seccion("Baches y Ventanas Horarias", report.get("gaps", []), fmt_gap, ft.icons.SCHEDULE_ROUNDED))
 
+        # 4.5. Baches y Carga Diaria de Profesores
+        def fmt_prof_gap(f):
+            day_idx = f.get('day', 0)
+            dia_str = dias_semana[day_idx] if isinstance(day_idx, int) and 0 <= day_idx < len(dias_semana) else str(day_idx)
+            prof = fmt_profesor(f.get('teacher_name') or f.get('teacher_id') or '')
+            tipo = f.get('type', 'Incidencia de jornada')
+            if 'gaps_count' in f:
+                detalle = f"tiene {f.get('gaps_count')} horas libres/huecos en los bloques: {f.get('hours', [])}"
+            elif 'hours_count' in f:
+                detalle = f"{tipo}"
+            else:
+                detalle = tipo
+            return f"El profesor {prof}: {detalle} el día {dia_str}.".strip()
+
+        if "teacher_gaps" in report:
+            items_reporte.append(helper_seccion("Baches y Carga Diaria de Profesores", report.get("teacher_gaps", []), fmt_prof_gap, ft.icons.PERSON_SEARCH_ROUNDED))
+
         # 5. Materias Repetidas el Mismo Día
         def fmt_rep(f):
             day_idx = f.get('day', 0)
@@ -696,6 +734,112 @@ def vista_generacion():
         btn_regenerar.disabled = False
         page.update()
 
+    def _validar_datos_para_generacion(data_handler) -> list[str]:
+        """Valida la consistencia de los datos antes de ejecutar el algoritmo genético."""
+        errores = []
+
+        if not data_handler.groups:
+            errores.append("No hay secciones registradas en la base de datos.")
+        if not data_handler.teachers:
+            errores.append("No hay profesores activos registrados en la base de datos.")
+        if not data_handler.academic_hours:
+            errores.append("No hay sesiones / horas académicas configuradas en el sistema.")
+
+        # 1. Materias sin profesor asignado
+        materias_sin_profesor = []
+        for g in data_handler.groups:
+            for s in g.subjects:
+                if s.name != "Actividad Complementaria" and s.teacher is None:
+                    materias_sin_profesor.append(f"• {s.name} (en curso: {g.name})")
+
+        if materias_sin_profesor:
+            limite = 8
+            ejemplos = "\n".join(materias_sin_profesor[:limite])
+            mas = f"\n  ... y {len(materias_sin_profesor) - limite} más." if len(materias_sin_profesor) > limite else ""
+            errores.append(
+                f"Hay {len(materias_sin_profesor)} materia(s) sin profesor asignado:\n{ejemplos}{mas}\n"
+                "➔ Solución: Vaya al módulo 'Profesores' y asigne un profesor a cada materia."
+            )
+
+        # 2. Profesores asignados que no tienen bloques de disponibilidad horaria
+        profesores_sin_disponibilidad = set()
+        for g in data_handler.groups:
+            for s in g.subjects:
+                if s.teacher is not None and not getattr(s.teacher, "availabilities", None):
+                    profesores_sin_disponibilidad.add(f"• Prof. {s.teacher.name} {s.teacher.last_name}")
+
+        if profesores_sin_disponibilidad:
+            lista_profs = "\n".join(sorted(profesores_sin_disponibilidad))
+            errores.append(
+                f"Los siguientes profesores tienen materias asignadas pero no tienen horas de disponibilidad asignadas:\n{lista_profs}\n"
+                "➔ Solución: Vaya al módulo 'Profesores', edite al profesor y asigne sus bloques de hora disponibles."
+            )
+
+        # 3. Cursos sin materias
+        cursos_vacios = []
+        for g in data_handler.groups:
+            if not g.subjects:
+                cursos_vacios.append(f"• {g.name}")
+
+        if cursos_vacios:
+            lista_cursos = "\n".join(cursos_vacios)
+            errores.append(
+                f"Los siguientes cursos no tienen materias asignadas:\n{lista_cursos}\n"
+                "➔ Solución: Agregue asignaturas a estos cursos en el módulo 'Cursos'."
+            )
+
+        return errores
+
+    def _mostrar_dialogo_error_generacion(page, titulo: str, mensaje_principal: str, detalles: list[str] | str):
+        def cerrar_dialogo(e):
+            modal_error.open = False
+            page.update()
+
+        if isinstance(detalles, list):
+            texto_detalles = "\n\n".join(detalles)
+        else:
+            texto_detalles = str(detalles)
+
+        modal_error = ft.AlertDialog(
+            content=ft.Container(
+                content=ft.Column([
+                    ft.Row([
+                        ft.Icon(ft.icons.ERROR_OUTLINE_ROUNDED, color="#FF6B6B", size=30),
+                        ft.Text(titulo, weight=ft.FontWeight.BOLD, color=ft.colors.WHITE, size=15, expand=True),
+                    ], alignment=ft.MainAxisAlignment.START, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                    ft.Text(mensaje_principal, color="#D0D0E0", size=13),
+                    ft.Container(
+                        content=ft.Column([
+                            ft.Text(texto_detalles, color="#A0A0B0", size=12, selectable=True),
+                        ], scroll=ft.ScrollMode.AUTO),
+                        bgcolor="#161822",
+                        border_radius=8,
+                        padding=12,
+                        border=ft.border.all(1, "#303346"),
+                        height=240,
+                    ),
+                ], spacing=12, tight=True),
+                width=520,
+            ),
+            bgcolor="#1E202D",
+            shape=ft.RoundedRectangleBorder(radius=15),
+            actions=[
+                ft.ElevatedButton(
+                    "Entendido",
+                    on_click=cerrar_dialogo,
+                    bgcolor="#4B93F8",
+                    color=ft.colors.WHITE,
+                    style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=10)),
+                )
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+            actions_padding=15,
+        )
+
+        page.dialog = modal_error
+        modal_error.open = True
+        page.update()
+
     def ejecutar_algoritmo_genetico(page):
         max_generaciones = 250
 
@@ -712,12 +856,48 @@ def vista_generacion():
                 page.update()
                 genetics.reload_data()
 
+            # ── Validar consistencia de los datos antes de generar ──
+            dh = getattr(genetics, 'data_handler', None)
+            if dh is not None:
+                errores_validacion = _validar_datos_para_generacion(dh)
+                if errores_validacion:
+                    _mostrar_dialogo_error_generacion(
+                        page,
+                        titulo="Datos Incompletos para Generar Horario",
+                        mensaje_principal="No se puede iniciar la generación porque se detectaron las siguientes inconsistencias en los datos:",
+                        detalles=errores_validacion
+                    )
+                    page.snack_bar = ft.SnackBar(
+                        content=ft.Row([
+                            ft.Icon(ft.icons.WARNING_AMBER_ROUNDED, color="#FFA726", size=18),
+                            ft.Text(
+                                "No se pudo generar el horario. Revise las observaciones en la ventana emergente.",
+                                color=ft.colors.WHITE, size=12, expand=True
+                            ),
+                        ]),
+                        bgcolor="#2A2215",
+                        duration=6000,
+                    )
+                    page.snack_bar.open = True
+                    _reset_ui_post_generacion(page)
+                    return
+
             # Leer config de actividad complementaria desde la UI
             comp_config = _leer_comp_config()
             if genetics and hasattr(genetics, 'set_complementary_config') and comp_config:
                 genetics.set_complementary_config(comp_config)
 
             events = genetics.create_events()
+            if not events:
+                _mostrar_dialogo_error_generacion(
+                    page,
+                    titulo="No Hay Eventos para Generar",
+                    mensaje_principal="No se crearon materias ni eventos a distribuir.",
+                    detalles="Asegúrese de haber configurado los cursos y sus materias correspondientes en el módulo 'Cursos'."
+                )
+                _reset_ui_post_generacion(page)
+                return
+
             population = genetics.create_population(50, events, comp_config)
 
             past_value = 0
@@ -735,7 +915,14 @@ def vista_generacion():
                     return
 
                 if academic_hours is not None and academic_hours_limits is not None:
-                    scores = genetics.fitness(population, academic_hours, academic_hours_limits)
+                    scores = genetics.fitness(
+                        population,
+                        academic_hours,
+                        academic_hours_limits,
+                        getattr(genetics, 'GROUPS_BY_ID', None),
+                        getattr(genetics, 'SUBJECTS_BY_ID', None),
+                        getattr(genetics, 'TEACHERS_BY_ID', None)
+                    )
                 else:
                     scores = genetics.fitness(population)
 
@@ -764,9 +951,17 @@ def vista_generacion():
                 past_value = best_fitness
 
             if academic_hours is not None and academic_hours_limits is not None:
-                scores = genetics.fitness(population, academic_hours, academic_hours_limits)
+                scores = genetics.fitness(
+                    population,
+                    academic_hours,
+                    academic_hours_limits,
+                    getattr(genetics, 'GROUPS_BY_ID', None),
+                    getattr(genetics, 'SUBJECTS_BY_ID', None),
+                    getattr(genetics, 'TEACHERS_BY_ID', None)
+                )
             else:
                 scores = genetics.fitness(population)
+
 
             fitness_population = list(zip(scores, population))
             fitness_population.sort(key=lambda x: x[0])
@@ -797,13 +992,33 @@ def vista_generacion():
 
         except Exception as ex:
             import traceback
-            err_msg = str(ex) or type(ex).__name__
-            traceback.print_exc()  # sigue imprimiendo en consola para debug
+            traceback.print_exc()
+            err_raw = str(ex) or type(ex).__name__
+
+            if "availabilities" in err_raw or (isinstance(ex, AttributeError) and "availabilities" in err_raw):
+                titulo = "Error de Disponibilidad de Profesores"
+                mensaje = (
+                    "Se produjo un error al calcular los horarios de los profesores. "
+                    "Este problema ocurre cuando una materia no tiene profesor asignado o el profesor carece de disponibilidad."
+                )
+                detalles = (
+                    "Posibles causas y soluciones:\n"
+                    "1. Materias sin profesor: Verifique en el módulo 'Profesores' que cada asignatura tengan su profesor correspondiente asignado.\n"
+                    "2. Profesor sin disponibilidad: Verifique en el módulo 'Profesores' que todos los profesores activos tengan horas disponibles asignadas.\n\n"
+                    f"Detalle técnico original: {err_raw}"
+                )
+            else:
+                titulo = f"Error durante la Generación ({type(ex).__name__})"
+                mensaje = "Ocurrió un error inesperado al procesar el horario:"
+                detalles = f"{err_raw}\n\nDetalle técnico:\n{traceback.format_exc()}"
+
+            _mostrar_dialogo_error_generacion(page, titulo, mensaje, detalles)
+
             page.snack_bar = ft.SnackBar(
                 content=ft.Row([
                     ft.Icon(ft.icons.ERROR_ROUNDED, color="#FF6B6B", size=18),
                     ft.Text(
-                        f"Error durante la generación: {err_msg}",
+                        f"Error: {titulo} (consulte la ventana de detalles)",
                         color=ft.colors.WHITE, size=12, expand=True
                     ),
                 ]),
@@ -926,8 +1141,10 @@ def vista_generacion():
 
     # El FilePicker debe registrarse como overlay en la página.
     # Retornamos un contenedor que, al montarse, agrega el overlay.
-    def _on_view_mount(e):
-        page = e.page if hasattr(e, 'page') else e.control.page
+    def _on_view_mount(e=None):
+        page = getattr(main_container, "page", None)
+        if not page and e is not None:
+            page = getattr(e, "page", None) or getattr(getattr(e, "control", None), "page", None)
         if page and file_picker not in (page.overlay or []):
             page.overlay.append(file_picker)
             page.update()

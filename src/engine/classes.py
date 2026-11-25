@@ -7,6 +7,11 @@ class Teacher():
         self.last_name = last_name
         self.availabilities = availabilities
         self.rooms = rooms
+        self.weekly_hours: int = 0
+        self.teacher_type: str = "general" # "general", "taller_proyecto", "mixto"
+        self.min_daily_hours: int | None = None
+        self.max_daily_hours: int | None = None
+        self.assigned_subjects: list[Subject] = []
 
 class Subject():
     def __init__(self, id: int, name: str, subject_type: str, hours: int, teacher: Teacher):
@@ -31,9 +36,10 @@ class Availability:
         self.end_idx = end_idx #Indice virtual final
 
 class Room():
-    def __init__(self, id:int, name: str):
+    def __init__(self, id:int, name: str, is_taller:bool):
         self.id = id
         self.name = name
+        self.is_taller = is_taller
 
 class Group():
     def __init__(self, id: int, year: int, name: str, subjects: list[Subject], rooms: list[Room] = None):

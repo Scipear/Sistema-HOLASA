@@ -7,7 +7,8 @@ def fitness(
     academic_hours: list[Academic_Hour] = None,
     academic_hours_limits: dict = None,
     groups_by_id: dict = None,
-    subjects_by_id: dict = None
+    subjects_by_id: dict = None,
+    teachers_by_id: dict = None
 ):
     results = []
     
@@ -19,8 +20,9 @@ def fitness(
         gap_score, _ = groups_gaps(individual, academic_hours, academic_hours_limits) if academic_hours and academic_hours_limits else (0, [])
         sub_score, _ = subject_day(individual, academic_hours) if academic_hours else (0, [])
         fri_score, _ = friday_distribution_constraints(individual, academic_hours, academic_hours_limits, groups_by_id, subjects_by_id) if academic_hours and academic_hours_limits else (0, [])
+        t_gap_score, _ = teachers_gaps_and_load(individual, academic_hours, academic_hours_limits, teachers_by_id) if academic_hours and academic_hours_limits else (0, [])
         
-        total_score = g_score + t_score + r_score + gap_score + sub_score + fri_score
+        total_score = g_score + t_score + r_score + gap_score + sub_score + fri_score + t_gap_score
         results.append(total_score)
 
     return results
@@ -116,7 +118,7 @@ def rooms_groups(individual: list[Event]):
 
                 if key in rooms_occupation:
                     existing_event = rooms_occupation[key]
-                    score += 0
+                    score += 500
                     collisions.append({
                         "room_id": event.room,
                         "block": block,
@@ -180,7 +182,7 @@ def groups_gaps(individual: list[Event], academic_hours: list[Academic_Hour], ac
                     gaps_count += 1
                     specific_hours.append(academic_hours[block].start_hour)
             
-            if gaps_count > 0:
+            if gaps_count > 1:
                 gap_penalty = gaps_count * 400
                 score += gap_penalty
                 gaps_report.append({
@@ -364,3 +366,111 @@ def friday_distribution_constraints(
             })
 
     return score, friday_report
+
+
+def teachers_gaps_and_load(
+    individual: list[Event],
+    academic_hours: list[Academic_Hour],
+    academic_hours_limits: dict,
+    teachers_by_id: dict = None
+):
+    """
+    Evalúa las reglas de calidad para la jornada de los profesores:
+    1. Baches/Huecos intermedios: Minimizar ventanas vacías entre clases del profesor el mismo día.
+    2. Límites diarios de carga:
+       - No aplica a profesores de únicamente taller/proyecto.
+       - Para profesores generales o mixtos, penaliza si dan menos horas que min_daily_hours
+         o más horas que max_daily_hours en días activos.
+    """
+    if not academic_hours or not academic_hours_limits:
+        return 0, []
+
+    if teachers_by_id is None:
+        try:
+            from src.engine import genetics
+            teachers_by_id = getattr(genetics, 'TEACHERS_BY_ID', {})
+        except Exception:
+            teachers_by_id = {}
+
+    score = 0
+    teacher_reports = []
+
+    # 1. Mapear horas ocupadas por profesor y día
+    teacher_day_map = {}
+    for event in individual:
+        if event.start_hour is None or event.teacher is None:
+            continue
+
+        t_id = event.teacher
+        for block in range(event.start_hour, event.start_hour + event.duration):
+            day = academic_hours[block].day_index
+            teacher_day_map.setdefault(t_id, {}).setdefault(day, set()).add(block)
+
+    # 2. Evaluar baches y límites por profesor y día activo
+    for t_id, days in teacher_day_map.items():
+        teacher_obj = teachers_by_id.get(t_id) if teachers_by_id else None
+        t_name = f"{teacher_obj.name} {teacher_obj.last_name}" if teacher_obj else f"Profesor {t_id}"
+        t_type = getattr(teacher_obj, 'teacher_type', 'general')
+        min_dh = getattr(teacher_obj, 'min_daily_hours', None)
+        max_dh = getattr(teacher_obj, 'max_daily_hours', None)
+
+        for day, occupied_blocks in days.items():
+            if not occupied_blocks:
+                continue
+
+            first_block = min(occupied_blocks)
+            last_block = max(occupied_blocks)
+            total_hours = len(occupied_blocks)
+
+            # --- A. Baches / Huecos intermedios en el horario del profesor ---
+            gaps_count = 0
+            gap_hours = []
+            for block in range(first_block, last_block + 1):
+                if block not in occupied_blocks:
+                    gaps_count += 1
+                    gap_hours.append(academic_hours[block].start_hour)
+
+            if gaps_count > 2:
+                gap_penalty = gaps_count * 350
+                score += gap_penalty
+                teacher_reports.append({
+                    "teacher_id": t_id,
+                    "teacher_name": t_name,
+                    "day": day,
+                    "type": "Huecos intermedios en la jornada del profesor",
+                    "gaps_count": gaps_count,
+                    "hours": gap_hours,
+                    "penalty": gap_penalty
+                })
+
+            # --- B. Límites de carga diaria (No aplica a taller_proyecto puro) ---
+            if t_type == "general":
+                # Día muy corto para el profesor (ej. 1 o 2 horas cuando su mínimo es 6)
+                if min_dh is not None and min_dh > 0 and total_hours < min_dh:
+                    short_penalty = (min_dh - total_hours) * 300
+                    score += short_penalty
+                    teacher_reports.append({
+                        "teacher_id": t_id,
+                        "teacher_name": t_name,
+                        "day": day,
+                        "type": f"Jornada muy corta ({total_hours} hrs lectivas, mínimo esperado {min_dh})",
+                        "hours_count": total_hours,
+                        "min_expected": min_dh,
+                        "penalty": short_penalty
+                    })
+
+                # Día sobrecargado para el profesor (ej. 10 horas cuando su máximo es 8)
+                if max_dh is not None and max_dh > 0 and total_hours > max_dh:
+                    excess_penalty = (total_hours - max_dh) * 300
+                    score += excess_penalty
+                    teacher_reports.append({
+                        "teacher_id": t_id,
+                        "teacher_name": t_name,
+                        "day": day,
+                        "type": f"Jornada sobrecargada ({total_hours} hrs lectivas, máximo permitido {max_dh})",
+                        "hours_count": total_hours,
+                        "max_expected": max_dh,
+                        "penalty": excess_penalty
+                    })
+
+    return score, teacher_reports

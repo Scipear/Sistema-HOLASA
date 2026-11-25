@@ -653,6 +653,23 @@ def vista_generacion():
 
         items_reporte.append(helper_seccion("Baches y Ventanas Horarias", report.get("gaps", []), fmt_gap, ft.icons.SCHEDULE_ROUNDED))
 
+        # 4.5. Baches y Carga Diaria de Profesores
+        def fmt_prof_gap(f):
+            day_idx = f.get('day', 0)
+            dia_str = dias_semana[day_idx] if isinstance(day_idx, int) and 0 <= day_idx < len(dias_semana) else str(day_idx)
+            prof = fmt_profesor(f.get('teacher_name') or f.get('teacher_id') or '')
+            tipo = f.get('type', 'Incidencia de jornada')
+            if 'gaps_count' in f:
+                detalle = f"tiene {f.get('gaps_count')} horas libres/huecos en los bloques: {f.get('hours', [])}"
+            elif 'hours_count' in f:
+                detalle = f"{tipo}"
+            else:
+                detalle = tipo
+            return f"El profesor {prof}: {detalle} el día {dia_str}.".strip()
+
+        if "teacher_gaps" in report:
+            items_reporte.append(helper_seccion("Baches y Carga Diaria de Profesores", report.get("teacher_gaps", []), fmt_prof_gap, ft.icons.PERSON_SEARCH_ROUNDED))
+
         # 5. Materias Repetidas el Mismo Día
         def fmt_rep(f):
             day_idx = f.get('day', 0)
@@ -898,7 +915,14 @@ def vista_generacion():
                     return
 
                 if academic_hours is not None and academic_hours_limits is not None:
-                    scores = genetics.fitness(population, academic_hours, academic_hours_limits)
+                    scores = genetics.fitness(
+                        population,
+                        academic_hours,
+                        academic_hours_limits,
+                        getattr(genetics, 'GROUPS_BY_ID', None),
+                        getattr(genetics, 'SUBJECTS_BY_ID', None),
+                        getattr(genetics, 'TEACHERS_BY_ID', None)
+                    )
                 else:
                     scores = genetics.fitness(population)
 
@@ -927,9 +951,17 @@ def vista_generacion():
                 past_value = best_fitness
 
             if academic_hours is not None and academic_hours_limits is not None:
-                scores = genetics.fitness(population, academic_hours, academic_hours_limits)
+                scores = genetics.fitness(
+                    population,
+                    academic_hours,
+                    academic_hours_limits,
+                    getattr(genetics, 'GROUPS_BY_ID', None),
+                    getattr(genetics, 'SUBJECTS_BY_ID', None),
+                    getattr(genetics, 'TEACHERS_BY_ID', None)
+                )
             else:
                 scores = genetics.fitness(population)
+
 
             fitness_population = list(zip(scores, population))
             fitness_population.sort(key=lambda x: x[0])
